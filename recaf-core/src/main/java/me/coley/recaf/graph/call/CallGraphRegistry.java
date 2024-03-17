@@ -3,6 +3,7 @@ package me.coley.recaf.graph.call;
 import dev.xdark.jlinker.LinkResolver;
 import dev.xdark.jlinker.Result;
 import me.coley.recaf.code.*;
+import me.coley.recaf.mapping.*;
 import me.coley.recaf.util.CancelSignal;
 import me.coley.recaf.util.MemoizedFunction;
 import me.coley.recaf.util.logging.Logging;
@@ -21,7 +22,7 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-public final class CallGraphRegistry implements WorkspaceListener, ResourceClassListener {
+public final class CallGraphRegistry implements WorkspaceListener, ResourceClassListener, AggregatedMappingsListener {
 	private static final Logger LOGGER = Logging.get(CallGraphRegistry.class);
 	private final Map<ClassInfo, Map<Descriptor, MethodInfo>> methodMap = new HashMap<>();
 	private final Map<MethodInfo, MutableCallGraphVertex> vertexMap = new HashMap<>();
@@ -32,15 +33,16 @@ public final class CallGraphRegistry implements WorkspaceListener, ResourceClass
 		this.workspace = workspace;
 	}
 
-	public static CallGraphRegistry createAndLoad(Workspace workspace) {
-		CallGraphRegistry registry = create(workspace);
+	public static CallGraphRegistry createAndLoad(Workspace workspace, MappingsManager mappingsManager) {
+		CallGraphRegistry registry = create(workspace, mappingsManager);
 		registry.load();
 		return registry;
 	}
 
-	public static CallGraphRegistry create(Workspace workspace) {
+	public static CallGraphRegistry create(Workspace workspace, MappingsManager mappingsManager) {
 		CallGraphRegistry registry = new CallGraphRegistry(workspace);
 		workspace.addListener(registry);
+		mappingsManager.addAggregatedMappingsListener(registry);
 		return registry;
 	}
 
@@ -68,14 +70,7 @@ public final class CallGraphRegistry implements WorkspaceListener, ResourceClass
 		final CachedLinkResolver resolver = new CachedLinkResolver();
 		resources.getClasses().forEach(info -> visitClass(info, classInfoFromPathResolver, methodMapGetter, resolver));
 		methodMap.clear();
-		LOGGER.info("Loaded {} vertices for {} classes, {} unresolved calls for {} methods in {} classes", vertexMap.size(),
-				vertexMap.keySet().stream().map(MethodInfo::getOwner).distinct().count(),
-				unresolvedCalls.values().stream().mapToInt(Set::size).sum(),
-				unresolvedCalls.values().stream().flatMap(Collection::stream).map(UnresolvedCall::getVertex).distinct().count(),
-				unresolvedCalls.values().stream().flatMap(Collection::stream)
-						.map(UnresolvedCall::getVertex).map(MutableCallGraphVertex::getMethodInfo)
-						.map(MemberInfo::getOwner)
-						.distinct().count());
+		announceStats();
 	}
 
 	@Nullable
@@ -152,7 +147,8 @@ public final class CallGraphRegistry implements WorkspaceListener, ResourceClass
 		if (call == null) {
 			try {
 				call = resolveMethodInfo(resolver, classInfoFromPathResolver, opcode, callClassInfo, name, descriptor);
-			} catch (CancelSignal ignored) {}
+			} catch (CancelSignal ignored) {
+			}
 			// should it log on else here? or would it be spam?
 		}
 		if (call == null) {
@@ -160,7 +156,7 @@ public final class CallGraphRegistry implements WorkspaceListener, ResourceClass
 			return;
 		}
 		MutableCallGraphVertex nestedVertex = vertexMap.computeIfAbsent(call, MutableCallGraphVertex::new);
-		vertex.getCalls().add(nestedVertex);
+		vertex.getCalls().add(Map.entry(opcode, nestedVertex));
 		nestedVertex.getCallers().add(vertex);
 	}
 
@@ -186,7 +182,8 @@ public final class CallGraphRegistry implements WorkspaceListener, ResourceClass
 		);
 		final int newSum = unresolvedCalls.values().stream().mapToInt(Set::size).sum();
 		if (oldSum == newSum) LOGGER.debug("The number of unresolved calls didn't change.");
-		else if (oldSum < newSum) LOGGER.debug("{} new unresolved calls added, there are {} now.", newSum - oldSum, newSum);
+		else if (oldSum < newSum)
+			LOGGER.debug("{} new unresolved calls added, there are {} now.", newSum - oldSum, newSum);
 		else LOGGER.debug("{} unresolved calls resolved, there are {} now.", oldSum - newSum, newSum);
 	}
 
@@ -202,14 +199,7 @@ public final class CallGraphRegistry implements WorkspaceListener, ResourceClass
 		updateUnresolved(classInfoFromPathResolver, methodMapGetter, LinkResolver.jvm());
 		final CachedLinkResolver resolver = new CachedLinkResolver();
 		library.getClasses().forEach(c -> visitClass(c, classInfoFromPathResolver, methodMapGetter, resolver));
-		LOGGER.info("There are now {} vertices for {} classes, {} unresolved calls for {} methods in {} classes", vertexMap.size(),
-				vertexMap.keySet().stream().map(MethodInfo::getOwner).distinct().count(),
-				unresolvedCalls.values().stream().mapToInt(Set::size).sum(),
-				unresolvedCalls.values().stream().flatMap(Collection::stream).map(UnresolvedCall::getVertex).distinct().count(),
-				unresolvedCalls.values().stream().flatMap(Collection::stream)
-						.map(UnresolvedCall::getVertex).map(MutableCallGraphVertex::getMethodInfo)
-						.map(MemberInfo::getOwner)
-						.distinct().count());
+		announceStats();
 	}
 
 	@Override
@@ -221,7 +211,63 @@ public final class CallGraphRegistry implements WorkspaceListener, ResourceClass
 				= clazz -> (name, descriptor) -> getMethodMap(clazz).get(new Descriptor(name, descriptor));
 		updateUnresolved(classInfoFromPathResolver, methodMapGetter, LinkResolver.jvm());
 		visitClass(newValue, classInfoFromPathResolver, methodMapGetter, new CachedLinkResolver());
-		LOGGER.info("There are now {} vertices for {} classes, {} unresolved calls for {} methods in {} classes", vertexMap.size(),
+		announceStats();
+	}
+
+	@Override
+	public void onRemoveLibrary(Workspace workspace, Resource library) {
+		LOGGER.info("Removing {} classes...", library.getClasses().size());
+		onRemoveClasses(library, library.getClasses().values());
+	}
+
+	@Override
+	public void onRemoveClass(Resource resource, ClassInfo oldValue) {
+		onRemoveClasses(resource, Set.of(oldValue));
+	}
+
+	private void onRemoveClasses(Resource resource, Collection<ClassInfo> oldValues) {
+		LOGGER.info("Removing {} methods...", oldValues.stream().mapToInt(v -> v.getMethods().size()).sum());
+		Set<String> classNames = oldValues.stream().map(ClassInfo::getName).collect(Collectors.toUnmodifiableSet());
+		// affected calls
+		vertexMap.keySet().removeIf(vertex -> classNames.contains(vertex.getOwner()));
+		// affected calls from methods
+		vertexMap.values().forEach(v -> {
+			v.getCallers().removeIf(c -> classNames.contains(c.getMethodInfo().getOwner()));
+		});
+		// affected calls to methods
+		vertexMap.values().stream().map(v -> {
+			var temp = new HashSet<Map.Entry<Integer, MutableCallGraphVertex>>();
+			// calls of current methods
+			Iterator<Map.Entry<Integer, CallGraphVertex>> callsIterator = v.getCalls().iterator();
+			while (callsIterator.hasNext()) {
+				Map.Entry<Integer, CallGraphVertex> callGraphVertex = callsIterator.next();
+				// remove if the called method has the removed owner and add to temp
+				if (classNames.contains(callGraphVertex.getValue().getMethodInfo().getOwner())) {
+					//noinspection unchecked,rawtypes
+					temp.add((Map.Entry<Integer, MutableCallGraphVertex>) (Map.Entry) callGraphVertex);
+					callsIterator.remove();
+				}
+			}
+			return Map.entry(v, temp.stream());
+		}).forEach(e -> {
+			// adding all unresolved calls from the ownerVertex
+			MutableCallGraphVertex ownerVertex = e.getKey();
+			e.getValue().forEach(opcodeAndMethode -> {
+				MethodInfo methodInfo = opcodeAndMethode.getValue().getMethodInfo();
+				unresolvedCalls
+						.computeIfAbsent(methodInfo.getOwner(), (k) -> new HashSet<>())
+						.add(new UnresolvedCall(opcodeAndMethode.getKey(), methodInfo.getOwner(), methodInfo.getName(), methodInfo.getDescriptor(), ownerVertex));
+			});
+		});
+		// investigate this more!
+		vertexMap.values().removeIf(v -> v.getCallers().isEmpty() && v.getCalls().isEmpty());
+		announceStats();
+	}
+
+
+	private void announceStats() {
+		LOGGER.info("There are now {} vertices for {} classes, {} unresolved calls for {} methods in {} classes",
+				vertexMap.size(),
 				vertexMap.keySet().stream().map(MethodInfo::getOwner).distinct().count(),
 				unresolvedCalls.values().stream().mapToInt(Set::size).sum(),
 				unresolvedCalls.values().stream().flatMap(Collection::stream).map(UnresolvedCall::getVertex).distinct().count(),
@@ -229,24 +275,6 @@ public final class CallGraphRegistry implements WorkspaceListener, ResourceClass
 						.map(UnresolvedCall::getVertex).map(MutableCallGraphVertex::getMethodInfo)
 						.map(MemberInfo::getOwner)
 						.distinct().count());
-	}
-
-	@Override
-	public void onRemoveLibrary(Workspace workspace, Resource library) {
-		//		LOGGER.debug("Removing {} classes...", library.getClasses().size());
-		//		updateRemovedMethods(workspace, library.getClasses().values());
-		//		LOGGER.debug("There are now {} vertices, and {} unresolved calls", vertexMap.size(), unresolvedCalls.values().stream().mapToInt(Set::size).sum());
-		clear();
-		load();
-	}
-
-	@Override
-	public void onRemoveClass(Resource resource, ClassInfo oldValue) {
-		//		LOGGER.debug("Removing {} methods...", oldValue.getMethods().size());
-		//		updateRemovedMethods(workspace, Set.of(oldValue));
-		//		LOGGER.debug("There are now {} vertices, and {} unresolved calls.", vertexMap.size(), unresolvedCalls.values().stream().mapToInt(Set::size).sum());
-		clear();
-		load();
 	}
 
 	private void updateRemovedMethods(Workspace workspace, Collection<ClassInfo> removedClasses) {
@@ -264,8 +292,8 @@ public final class CallGraphRegistry implements WorkspaceListener, ResourceClass
 				.filter(v -> removedClassNames.contains(v.getMethodInfo().getOwner()))
 				.flatMap(vertex -> {
 					// removed -/> called
-					for (CallGraphVertex m : vertex.getCalls()) {
-						m.getCallers().remove(vertex);
+					for (Map.Entry<Integer, CallGraphVertex> m : vertex.getCalls()) {
+						m.getValue().getCallers().remove(vertex);
 					}
 					// callers -> removed
 					return vertex.getCallers().stream();
@@ -278,8 +306,8 @@ public final class CallGraphRegistry implements WorkspaceListener, ResourceClass
 		for (MutableCallGraphVertex affectedVertex : (Set<MutableCallGraphVertex>) (Set) affectedVertices) {
 			affectedVertex.visited = false;
 			// callers -/> called
-			for (CallGraphVertex call : affectedVertex.getCalls()) {
-				call.getCallers().remove(affectedVertex);
+			for (Map.Entry<Integer, CallGraphVertex> entry : affectedVertex.getCalls()) {
+				entry.getValue().getCallers().remove(affectedVertex);
 			}
 			affectedVertex.getCalls().clear();
 		}
@@ -300,6 +328,19 @@ public final class CallGraphRegistry implements WorkspaceListener, ResourceClass
 	public void onUpdateClass(Resource resource, ClassInfo oldValue, ClassInfo newValue) {
 		onRemoveClass(resource, oldValue);
 		onNewClass(resource, newValue);
+	}
+
+	private Mappings currentApplication = null;
+
+	@Override
+	public void onAggregatedMappingsInitiated(Mappings mappings) {
+		// make changes based on these mappings
+		currentApplication = mappings;
+	}
+
+	@Override
+	public void onAggregatedMappingsUpdated(AggregatedMappings mappings) {
+		currentApplication = null;
 	}
 
 	protected static final class Descriptor {

@@ -143,8 +143,7 @@ public class DirectoryContextBuilder extends ContextBuilder {
 					if (fileName.startsWith(originalDirectory + "/")) {
 						String newDirectory = newHostDirectory + "/" + localName;
 						String renamedFile = fileName.replace(originalDirectory + "/", newDirectory + "/");
-						resource.getFiles().remove(fileName);
-						resource.getFiles().put(new FileInfo(renamedFile, fileInfo.getValue()));
+						resource.getFiles().rename(fileName, renamedFile, new FileInfo(renamedFile, fileInfo.getValue()));
 					}
 				}
 			}
@@ -169,8 +168,7 @@ public class DirectoryContextBuilder extends ContextBuilder {
 					String fileName = fileInfo.getName();
 					if (fileName.startsWith(originalDirectory + "/")) {
 						String renamedFile = fileName.replace(originalDirectory + "/", newDirectory + "/");
-						resource.getFiles().remove(fileName);
-						resource.getFiles().put(new FileInfo(renamedFile, fileInfo.getValue()));
+						resource.getFiles().rename(fileName, renamedFile, new FileInfo(renamedFile, fileInfo.getValue()));
 					}
 				}
 			}

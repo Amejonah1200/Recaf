@@ -40,6 +40,10 @@ public class MappingsManager extends ToolManager<MappingsTool> {
 		aggregateListeners.forEach(listener -> listener.onAggregatedMappingsUpdated(getAggregatedMappings()));
 	}
 
+	public void prepareAggregateMappings(Mappings mappings) {
+		aggregateListeners.forEach(listener -> listener.onAggregatedMappingsInitiated(mappings));
+	}
+
 	/**
 	 * Clears all mapping information.
 	 */

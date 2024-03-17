@@ -10,6 +10,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 /**
  * Basic groundwork for any mapping implementation. <br>
@@ -166,6 +167,33 @@ public class MappingsAdapter implements Mappings {
 				}
 			}
 		}
+	}
+
+	@Override
+	public Stream<ClassMapping> getMappedClasses() {
+		return mappings.entrySet().stream()
+				.filter(e -> e.getKey() instanceof ClassMappingKey)
+				.map(e -> new ClassMapping(((ClassMappingKey) e.getKey()).getName(), e.getValue()));
+	}
+
+	@Override
+	public Stream<MethodMapping> getMappedMethods() {
+		return mappings.entrySet().stream()
+				.filter(e -> e.getKey() instanceof MethodMappingKey)
+				.map(e -> {
+					MethodMappingKey mk = (MethodMappingKey) e.getKey();
+					return new MethodMapping(mk.getOwner(), mk.getName(), mk.getDesc(), e.getValue());
+				});
+	}
+
+	@Override
+	public Stream<FieldMapping> getMappedFields() {
+		return mappings.entrySet().stream()
+				.filter(e -> e.getKey() instanceof FieldMappingKey)
+				.map(e -> {
+					FieldMappingKey fk = (FieldMappingKey) e.getKey();
+					return new FieldMapping(fk.getOwner(), fk.getName(), fk.getDesc(), e.getValue());
+				});
 	}
 
 	/**

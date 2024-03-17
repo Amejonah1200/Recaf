@@ -45,12 +45,12 @@ public class MethodCallGraphPane extends BorderPane implements Updatable<CommonC
 	private final CallGraphMode mode;
 
 	public enum CallGraphMode {
-		CALLS(CallGraphVertex::getCalls),
-		CALLERS(CallGraphVertex::getCallers);
+		CALLS(callGraphVertex -> callGraphVertex.getCalls().stream().map(Map.Entry::getValue)),
+		CALLERS(callGraphVertex -> callGraphVertex.getCallers().stream());
 
-		private final Function<CallGraphVertex, Collection<CallGraphVertex>> childrenGetter;
+		private final Function<CallGraphVertex, Stream<CallGraphVertex>> childrenGetter;
 
-		CallGraphMode(Function<CallGraphVertex, Collection<CallGraphVertex>> getCallers) {
+		CallGraphMode(Function<CallGraphVertex, Stream<CallGraphVertex>> getCallers) {
 			childrenGetter = getCallers;
 		}
 	}
@@ -96,7 +96,7 @@ public class MethodCallGraphPane extends BorderPane implements Updatable<CommonC
 			}
 		}
 
-		private CallGraphItem buildCallGraph(MethodInfo rootMethod, CallGraphRegistry callGraph, Function<CallGraphVertex, Collection<CallGraphVertex>> childrenGetter) {
+		private CallGraphItem buildCallGraph(MethodInfo rootMethod, CallGraphRegistry callGraph, Function<CallGraphVertex, Stream<CallGraphVertex>> childrenGetter) {
 			ArrayDeque<MethodInfo> visitedMethods = new ArrayDeque<>();
 			ArrayDeque<List<CallGraphItem>> workingStack = new ArrayDeque<>();
 			CallGraphItem root;
@@ -112,8 +112,7 @@ public class MethodCallGraphPane extends BorderPane implements Updatable<CommonC
 					final CallGraphVertex vertex = callGraph.getVertex(item.getValue());
 					if (vertex != null) {
 						final List<CallGraphItem> newTodo = Stream.concat(
-										childrenGetter.apply(vertex)
-												.stream().map(CallGraphVertex::getMethodInfo),
+										childrenGetter.apply(vertex).map(CallGraphVertex::getMethodInfo),
 										mode == CallGraphMode.CALLERS ?
 												Stream.empty() :
 												callGraph.getUnresolvedCalls().values().stream()

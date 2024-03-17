@@ -8,7 +8,7 @@ import java.util.*;
 
 public final class MutableCallGraphVertex implements CallGraphVertex {
 	private final Set<CallGraphVertex> callers = new HashSet<>();
-	private final Set<CallGraphVertex> calls = Collections.newSetFromMap(new LinkedHashMap<>());
+	private final Set<Map.Entry<Integer, CallGraphVertex>> calls = Collections.newSetFromMap(new LinkedHashMap<>());
 	private final MethodInfo methodInfo;
 	boolean visited;
 
@@ -34,7 +34,7 @@ public final class MutableCallGraphVertex implements CallGraphVertex {
 	}
 
 	@Override
-	public Collection<CallGraphVertex> getCalls() {
+	public Collection<Map.Entry<Integer, CallGraphVertex>> getCalls() {
 		return calls;
 	}
 

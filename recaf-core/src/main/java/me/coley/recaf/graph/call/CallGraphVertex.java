@@ -5,6 +5,7 @@ import me.coley.recaf.code.MethodInfo;
 
 import javax.annotation.Nonnull;
 import java.util.Collection;
+import java.util.Map;
 
 public interface CallGraphVertex {
 
@@ -16,6 +17,6 @@ public interface CallGraphVertex {
 
 	Collection<CallGraphVertex> getCallers();
 
-	Collection<CallGraphVertex> getCalls();
+	Collection<Map.Entry<Integer, CallGraphVertex>> getCalls();
 
 }

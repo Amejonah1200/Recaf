@@ -164,8 +164,7 @@ public class FileContextBuilder extends ContextBuilder {
 				// Create mappings to use for renaming.
 				String newDirectory = directoryDialog.getSelectedDirectory();
 				String newName = newDirectory + "/" + name.substring(directorySeparator + 1);
-				resource.getFiles().remove(name);
-				resource.getFiles().put(new FileInfo(newName, info.getValue()));
+				resource.getFiles().rename(name, newName, new FileInfo(newName, info.getValue()));
 			}
 		} else {
 			logger.error("Failed to resolve containing resource for file '{}'", name);
@@ -194,8 +193,7 @@ public class FileContextBuilder extends ContextBuilder {
 						return;
 					}
 				}
-				resource.getFiles().remove(name);
-				resource.getFiles().put(newName, new FileInfo(newName, info.getValue()));
+				resource.getFiles().rename(name, newName, new FileInfo(newName, info.getValue()));
 			}
 		} else {
 			logger.error("Failed to resolve containing resource for file '{}'", name);

@@ -1,5 +1,6 @@
 package me.coley.recaf.workspace.resource;
 
+import me.coley.recaf.code.FileInfo;
 import me.coley.recaf.code.ItemInfo;
 import me.coley.recaf.util.EscapeUtil;
 import me.coley.recaf.util.logging.Logging;
@@ -286,5 +287,25 @@ public class ResourceItemMap<I extends ItemInfo> implements Map<String, I>, Iter
 	@Override
 	public Iterator<I> iterator() {
 		return backing.values().iterator();
+	}
+
+	public void rename(String name, String newName, I newItem) {
+		var old = backing.remove(name);
+		if (old == null) {
+			throw new IllegalStateException("Renaming of resource '" + name + "' to '" + newName + "' failed due to the newItem not being registered");
+		}
+		backing.put(newName, newItem);
+		var itemHistory = history.remove(name);
+		if (itemHistory != null) {
+			itemHistory.push(newItem);
+			history.put(newName, itemHistory);
+		}
+		for (CommonItemListener<I> listener : listeners) {
+			try {
+				listener.onUpdateItem(container, old, newItem);
+			} catch (Throwable t) {
+				logger.error("Uncaught error in resource listener (rename)", t);
+			}
+		}
 	}
 }

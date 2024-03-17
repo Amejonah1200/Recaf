@@ -127,6 +127,10 @@ public class Services {
 			javaParserHelper = null;
 			ssvmIntegration = null;
 			treeService = null;
+			if (callGraphRegistry != null) {
+				callGraphRegistry.clear();
+				mappingsManager.removeAggregatedMappingListener(callGraphRegistry);
+			}
 			callGraphRegistry = null;
 		} else {
 			inheritanceGraph = new InheritanceGraph(workspace);
@@ -134,7 +138,7 @@ public class Services {
 			javaParserHelper = JavaParserHelper.create(symbolSolver);
 			ssvmIntegration = new SsvmIntegration(workspace);
 			treeService = new WorkspaceTreeService(workspace);
-			CallGraphRegistry callGraphRegistry1 = CallGraphRegistry.create(workspace);
+			CallGraphRegistry callGraphRegistry1 = CallGraphRegistry.create(workspace, mappingsManager);
 			callGraphRegistry = callGraphRegistry1;
 			ThreadUtil.run(callGraphRegistry1::load);
 		}

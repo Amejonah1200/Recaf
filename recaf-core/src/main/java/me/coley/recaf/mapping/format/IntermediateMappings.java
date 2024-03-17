@@ -1,12 +1,10 @@
 package me.coley.recaf.mapping.format;
 
 import me.coley.recaf.mapping.Mappings;
-import me.coley.recaf.mapping.data.ClassMapping;
-import me.coley.recaf.mapping.data.FieldMapping;
-import me.coley.recaf.mapping.data.MethodMapping;
-import me.coley.recaf.mapping.data.VariableMapping;
+import me.coley.recaf.mapping.data.*;
 
 import java.util.*;
+import java.util.stream.Stream;
 
 /**
  * Collection of object representations of mappings. Useful as an intermediate between multiple
@@ -240,6 +238,21 @@ public class IntermediateMappings implements Mappings {
 	public void importIntermediate(IntermediateMappings mappings) {
 		// This is never used for intermediates, so we don't need to implement it.
 		// If somebody wants to, feel free to paste from MappingsAdapter.
+	}
+
+	@Override
+	public Stream<ClassMapping> getMappedClasses() {
+		return getClasses().values().stream();
+	}
+
+	@Override
+	public Stream<MethodMapping> getMappedMethods() {
+		return getMethods().entrySet().stream().flatMap((entry) -> entry.getValue().stream());
+	}
+
+	@Override
+	public Stream<FieldMapping> getMappedFields() {
+		return getFields().entrySet().stream().flatMap((entry) -> entry.getValue().stream());
 	}
 
 	private static String varKey(String ownerName, String methodName, String methodDesc) {

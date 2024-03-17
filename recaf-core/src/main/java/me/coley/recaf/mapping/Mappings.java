@@ -1,6 +1,10 @@
 package me.coley.recaf.mapping;
 
+import me.coley.recaf.mapping.data.*;
 import me.coley.recaf.mapping.format.IntermediateMappings;
+
+import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * Outline of all mapping implementations, allowing for clear retrieval regardless of internal storage of mappings.
@@ -127,4 +131,19 @@ public interface Mappings {
 	 * @see #exportIntermediate()
 	 */
 	void importIntermediate(IntermediateMappings mappings);
+
+	/**
+	 * @return All mappings for classes
+	 */
+	Stream<ClassMapping> getMappedClasses();
+
+	/**
+	 * @return All mappings for methods
+	 */
+	Stream<MethodMapping> getMappedMethods();
+
+	/**
+	 * @return All mappings for fields
+	 */
+	Stream<FieldMapping> getMappedFields();
 }

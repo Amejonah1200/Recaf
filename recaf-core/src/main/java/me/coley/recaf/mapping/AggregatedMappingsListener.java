@@ -7,6 +7,14 @@ package me.coley.recaf.mapping;
  */
 public interface AggregatedMappingsListener {
 	/**
+	 * Before any update to the mappings will call this.
+	 *
+	 * @param mappings
+	 * 		Mappings to be applied.
+	 */
+	default void onAggregatedMappingsInitiated(Mappings mappings) {}
+
+	/**
 	 * Any update to the aggregated mappings will call this.
 	 *
 	 * @param mappings

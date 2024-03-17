@@ -56,11 +56,12 @@ public class MappingUtils {
 					ClassMap classes = resource.getClasses();
 					synchronized(resource) {
 						newNames.add(newName);
-						classes.put(updatedInfo);
 						// Remove old classes if they have been renamed and do not occur
 						// in a set of newly applied names
 						if (!originalName.equals(newName) && !newNames.contains(originalName)) {
-							classes.remove(originalName);
+							classes.rename(originalName, newName, updatedInfo);
+						} else {
+							classes.put(updatedInfo);
 						}
 					}
 				}
@@ -95,6 +96,7 @@ public class MappingUtils {
 			MappingsAdapter adapter = (MappingsAdapter) mappings;
 			adapter.enableHierarchyLookup(controller.getServices().getInheritanceGraph());
 		}
+		controller.getServices().getMappingsManager().prepareAggregateMappings(mappings);
 		Set<String> modifiedClasses = applyMappingsWithoutAggregation(read, write, resource, mappings);
 		controller.getServices().getMappingsManager().updateAggregateMappings(mappings);
 		return modifiedClasses;
