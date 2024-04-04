@@ -1,7 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "baseBranches": ["dev4"],
-  repositories: ["Amejonah1200/Recaf"],
+  "repositories": ["Amejonah1200/Recaf"],
+  "prHourlyLimit": 10,
   "packageRules": [
     {
       "dependencyDashboardApproval": true,
