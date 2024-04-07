@@ -2,8 +2,12 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "onboardingConfigFileName": "renovate.json5",
-  "baseBranches": ["dev4"],
-  "repositories": ["Amejonah1200/Recaf"],
+  "baseBranches": [
+    "dev4"
+  ],
+  "repositories": [
+    "Amejonah1200/Recaf"
+  ],
   "prHourlyLimit": 10,
   "packageRules": [
     {
@@ -21,8 +25,8 @@
       "matchPackageNames": [
         "org.openrewrite:rewrite-java-17",
         "com.github.jumanji144.Jasm:jasm-core",
+        "com.github.jumanji144.Jasm:jasm-composition-jvm",
         "ch.qos.logback:logback-classic",
-        "com.github.jumanji144.Jasm:jasm-composition-jvm"
       ],
       "enabled": false,
     }
