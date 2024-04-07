@@ -2,25 +2,24 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "onboardingConfigFileName": "renovate.json5",
+  "extends": [
+    ":dependencyDashboard",
+    "group:allNonMajor",
+    // "group:githubArtifactActions", // Group download-artifact and upload-artifact major updates together.
+    "group:jacksonMonorepo",
+    "group:junit5Monorepo",
+    // "group:monorepos", // https://docs.renovatebot.com/presets-group/#groupmonorepos
+    // "workarounds:javaLTSVersions", // https://docs.renovatebot.com/presets-workarounds/#workaroundsjavaltsversions
+    ":prConcurrentLimitNone", // https://docs.renovatebot.com/presets-default/#prconcurrentlimitnone
+    // ":rebaseStalePrs" // Rebase existing PRs any time the base branch has been updated.
+  ],
   "baseBranches": [
     "dev4"
   ],
   "repositories": [
     "Amejonah1200/Recaf"
   ],
-  "prHourlyLimit": 10,
   "packageRules": [
-    {
-      "groupName": "all non-major dependencies",
-      "groupSlug": "all-non-major",
-      "matchPackagePatterns": [
-        "*"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch"
-      ]
-    },
     {
       "matchPackageNames": [
         "org.openrewrite:rewrite-java-17",
@@ -29,6 +28,18 @@
         "ch.qos.logback:logback-classic",
       ],
       "enabled": false,
+    },
+    {
+      "matchPackagePrefixes": ["org.ow2.asm:asm"],
+      "groupName": "asm monorepo"
+    },
+    {
+      "matchPackagePrefixes": ["org.kordamp.ikonli:ikonli-"],
+      "groupName": "ikonli monorepo"
+    },
+    {
+      "matchPackagePrefixes": ["com.github.jumanji144.Jasm:jasm-"],
+      "groupName": "jasm monorepo"
     }
   ]
 }
