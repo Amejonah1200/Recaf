@@ -1,29 +1,30 @@
+// "json5 > json" for configs: https://json5.org/
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "onboardingConfigFileName": "renovate.json5",
   "baseBranches": ["dev4"],
   "repositories": ["Amejonah1200/Recaf"],
   "prHourlyLimit": 10,
   "packageRules": [
     {
-      "dependencyDashboardApproval": true,
-      "matchUpdateTypes": [
-        "major"
-      ]
-    },
-    {
-      "groupName": "all non-major dependencies",
-      "groupSlug": "all-minor-patch",
+      "groupName": "all patch dependencies",
+      "groupSlug": "all-patch",
       "matchPackagePatterns": [
         "*"
       ],
       "matchUpdateTypes": [
-        "minor",
+        // "minor" can be added here
         "patch"
       ]
     },
     {
-      "matchPackageNames": ["org.openrewrite:rewrite-java-17", "eslint-config-base"],
-      "enabled": false
+      "matchPackageNames": [
+        "org.openrewrite:rewrite-java-17",
+        "com.github.jumanji144.Jasm:jasm-core",
+        "ch.qos.logback:logback-classic",
+        "com.github.jumanji144.Jasm:jasm-composition-jvm"
+      ],
+      "enabled": false,
     }
   ]
 }
