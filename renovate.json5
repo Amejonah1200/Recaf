@@ -1,0 +1,30 @@
+// "json5 > json" for configs: https://json5.org/
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "onboardingConfigFileName": "renovate.json5",
+  "baseBranches": ["dev4"],
+  "repositories": ["Amejonah1200/Recaf"],
+  "prHourlyLimit": 10,
+  "packageRules": [
+    {
+      "groupName": "all patch dependencies",
+      "groupSlug": "all-patch",
+      "matchPackagePatterns": [
+        "*"
+      ],
+      "matchUpdateTypes": [
+        // "minor" can be added here
+        "patch"
+      ]
+    },
+    {
+      "matchPackageNames": [
+        "org.openrewrite:rewrite-java-17",
+        "com.github.jumanji144.Jasm:jasm-core",
+        "ch.qos.logback:logback-classic",
+        "com.github.jumanji144.Jasm:jasm-composition-jvm"
+      ],
+      "enabled": false,
+    }
+  ]
+}
