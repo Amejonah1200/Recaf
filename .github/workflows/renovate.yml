@@ -10,6 +10,14 @@ jobs:
   renovate:
     runs-on: ubuntu-latest
     steps:
+      - name: Get token
+        id: get_token
+        uses: actions/create-github-app-token@v1
+        with:
+          private-key: ${{ secrets.renovate_private_key }}
+          app-id: ${{ secrets.renovate_app_id }}
+          owner: ${{ github.repository_owner }}
+          repositories: 'Recaf'
       - name: Checkout
         uses: actions/checkout@v4.1.1
       # consider tools cache if renovate jdk != recaf jdk
@@ -21,6 +29,8 @@ jobs:
           configurationFile: renovate.json5
           # consider github app instead of PAT:
           # https://github.com/renovatebot/github-action#example-with-github-app
-          token: ${{ secrets.RENOVATE_TOKEN }}
+          # https://docs.renovatebot.com/modules/platform/github/#running-as-a-github-app
+
+          token: '${{ steps.get_token.outputs.token }}'
         env:
           LOG_LEVEL: 'debug'
