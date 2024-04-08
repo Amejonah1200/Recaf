@@ -2,6 +2,7 @@ name: Renovate
 on:
   workflow_dispatch:
 #  schedule:
+#    # consider running it daily
 #    # The "*" (#42, asterisk) character has special semantics in YAML, so this
 #    # string has to be quoted.
 #    - cron: '*/5 * * * *'
@@ -11,10 +12,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4.1.1
+      # consider tools cache if renovate jdk != recaf jdk
+      # consider repository cache if run very frequently
+      # https://github.com/renovatebot/github-action#persisting-the-repository-cache
       - name: Self-hosted Renovate
         uses: renovatebot/github-action@v40.1.7
         with:
           configurationFile: renovate.json5
+          # consider github app instead of PAT:
+          # https://github.com/renovatebot/github-action#example-with-github-app
           token: ${{ secrets.RENOVATE_TOKEN }}
         env:
           LOG_LEVEL: 'debug'
