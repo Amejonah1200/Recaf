@@ -10,6 +10,7 @@ jobs:
   renovate:
     runs-on: ubuntu-latest
     steps:
+      # you can remove this step entirely and change to a PAT for the token below
       - name: Get token
         id: get_token
         uses: actions/create-github-app-token@v1
