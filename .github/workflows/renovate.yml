@@ -25,7 +25,7 @@ jobs:
       # consider repository cache if run very frequently
       # https://github.com/renovatebot/github-action#persisting-the-repository-cache
       - name: Self-hosted Renovate
-        uses: renovatebot/github-action@v40.1.7
+        uses: renovatebot/github-action@v40.1.8
         with:
           configurationFile: renovate.json5
           # consider github app instead of PAT:
