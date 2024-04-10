@@ -14,7 +14,7 @@
     // ":rebaseStalePrs" // Rebase existing PRs any time the base branch has been updated.
   ],
   "baseBranches": [
-    "dev4"
+    "dev4", "feature/renovate"
   ],
   "repositories": [
     "Amejonah1200/Recaf"
