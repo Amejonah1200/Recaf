@@ -9,15 +9,23 @@
     "group:jacksonMonorepo",
     "group:junit5Monorepo",
     // "group:monorepos", // https://docs.renovatebot.com/presets-group/#groupmonorepos
-    // "workarounds:javaLTSVersions", // https://docs.renovatebot.com/presets-workarounds/#workaroundsjavaltsversions
-    ":prConcurrentLimitNone", // https://docs.renovatebot.com/presets-default/#prconcurrentlimitnone
+    // Limit Java runtime versions to LTS releases. https://docs.renovatebot.com/presets-workarounds/#workaroundsjavaltsversions
+    // "workarounds:javaLTSVersions",
+    ":disableRateLimiting", // Remove hourly and concurrent rate limits.
+    // Use semantic commit type fix for dependencies and chore for all others if semantic commits are in use.
+    // ":semanticPrefixFixDepsChoreOthers",
+    // Avoid version fetching for Maven packages detected as project root. (?)
+    // "workarounds:disableMavenParentRoot",
+    // "semanticPrefixChore",
+    ":ignoreModulesAndTests", // Ignore node_modules, bower_components, vendor and various test/tests directories.
+    // "semanticPrefixFix",
     // ":rebaseStalePrs" // Rebase existing PRs any time the base branch has been updated.
   ],
   "baseBranches": [
-    "dev4", "feature/renovate"
+    "dev4",
   ],
   "repositories": [
-    "Amejonah1200/Recaf"
+    "Col-E/Recaf"
   ],
   "packageRules": [
     {
@@ -39,7 +47,7 @@
     },
     {
       "matchPackagePrefixes": ["com.github.jumanji144.Jasm:jasm-"],
-      "groupName": "jasm monorepo"
+      "groupName": "jasm monorepo",
     }
   ]
 }
