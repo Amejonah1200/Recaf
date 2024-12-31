@@ -3,6 +3,8 @@ package software.coley.recaf.path;
 import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
 import software.coley.recaf.workspace.model.Workspace;
+import software.coley.recaf.workspace.model.bundle.Bundle;
+import software.coley.recaf.workspace.model.resource.WorkspaceResource;
 
 import java.util.Set;
 import java.util.function.Consumer;
@@ -11,6 +13,10 @@ import java.util.function.Consumer;
  * A <i>"modular"</i> value type for representing <i>"paths"</i> to content in a {@link Workspace}.
  * The path must contain all data in a <i>"chain"</i> such that it can have access from most specific portion
  * all the way up to the {@link Workspace} portion.
+ * <p/>
+ * <b>NOTE: Regarding contents in embedded resources,</b> the path result of the methods like
+ * {@link Workspace#findClass(String)} will contain the root {@link WorkspaceResource} but the exact {@link Bundle}.
+ * To find the exact embedded resource of a result use {@link WorkspaceResource#resolveBundleContainer(Bundle)}.
  *
  * @param <V>
  * 		Path value type.
@@ -34,6 +40,22 @@ public interface PathNode<V> extends Comparable<PathNode<?>> {
 	@Nullable
 	@SuppressWarnings("rawtypes")
 	PathNode getParent();
+
+	/**
+	 * Creates a copy of the path node with this child-most node's value being looked up for a newer
+	 * value in the associated workspace.
+	 * <p/>
+	 * <b>Note:</b> A {@link WorkspacePathNode} must be present.
+	 *
+	 * @return A new path node pointing to the same location,
+	 * but with the {@link #getValue() value} being updated to the current in the associated {@link Workspace}.
+	 * If a lookup could not be done then the current instance is returned.
+	 */
+	@Nonnull
+	@SuppressWarnings("rawtypes")
+	default PathNode withCurrentWorkspaceContent() {
+		return this;
+	}
 
 	/**
 	 * @return Wrapped value.

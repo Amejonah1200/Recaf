@@ -48,7 +48,6 @@ public class BasicDirectoryContextMenuProviderFactory extends AbstractContextMen
 			var builder = new ContextMenuBuilder(menu, source).forDirectory(workspace, resource, bundle, directoryName);
 
 			if (source.isDeclaration()) {
-				builder.item("menu.tab.copypath", COPY_LINK, () -> ClipboardUtil.copyString(directoryName));
 				builder.directoryItem("menu.edit.copy", COPY_FILE, actions::copyDirectory);
 				builder.directoryItem("menu.edit.delete", TRASH_CAN, actions::deleteDirectory);
 
@@ -56,9 +55,15 @@ public class BasicDirectoryContextMenuProviderFactory extends AbstractContextMen
 				refactor.directoryItem("menu.refactor.move", STACKED_MOVE, actions::moveDirectory);
 				refactor.directoryItem("menu.refactor.rename", TAG_EDIT, actions::renameDirectory);
 
+				builder.directoryItem("menu.export.directory", EXPORT, actions::exportDirectory);
+
 				// TODO: implement operations
 				//  - Search references
 			}
+
+			// Copy path
+			builder.item("menu.tab.copypath", COPY_LINK, () -> ClipboardUtil.copyString(directoryName));
+
 			return menu;
 		};
 	}

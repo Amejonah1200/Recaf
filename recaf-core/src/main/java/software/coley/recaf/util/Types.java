@@ -5,6 +5,7 @@ import jakarta.annotation.Nullable;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.signature.SignatureReader;
+import org.objectweb.asm.signature.SignatureVisitor;
 import org.objectweb.asm.signature.SignatureWriter;
 
 import java.util.Arrays;
@@ -18,7 +19,16 @@ import java.util.List;
  */
 public class Types {
 	public static final Type OBJECT_TYPE = Type.getObjectType("java/lang/Object");
+	public static final Type CLASS_TYPE = Type.getObjectType("java/lang/Class");
 	public static final Type STRING_TYPE = Type.getObjectType("java/lang/String");
+	public static final Type ARRAY_1D_BOOLEAN = Type.getObjectType("[Z");
+	public static final Type ARRAY_1D_CHAR = Type.getObjectType("[C");
+	public static final Type ARRAY_1D_BYTE = Type.getObjectType("[B");
+	public static final Type ARRAY_1D_SHORT = Type.getObjectType("[S");
+	public static final Type ARRAY_1D_INT = Type.getObjectType("[I");
+	public static final Type ARRAY_1D_FLOAT = Type.getObjectType("[F");
+	public static final Type ARRAY_1D_DOUBLE = Type.getObjectType("[D");
+	public static final Type ARRAY_1D_LONG = Type.getObjectType("[J");
 	public static final Type[] PRIMITIVES = new Type[]{
 			Type.VOID_TYPE,
 			Type.BOOLEAN_TYPE,
@@ -97,16 +107,16 @@ public class Types {
 	}
 
 	/**
-	 * @param desc
+	 * @param name
 	 * 		Some class name.
 	 *
 	 * @return {@code true} if it matches the class name of a primitive type.
 	 */
-	public static boolean isPrimitiveClassName(@Nullable String desc) {
-		if (desc == null)
+	public static boolean isPrimitiveClassName(@Nullable String name) {
+		if (name == null)
 			return false;
 		for (Type prim : PRIMITIVES)
-			if (prim.getClassName().equals(desc))
+			if (prim.getClassName().equals(name))
 				return true;
 		return false;
 	}
@@ -325,12 +335,13 @@ public class Types {
 	 * @param signature
 	 * 		Signature text.
 	 * @param isTypeSignature
-	 * 		See {@link org.objectweb.asm.commons.ClassRemapper} for usage.
+	 * 		See {@link org.objectweb.asm.signature.SignatureReader#accept(SignatureVisitor)} ({@code false})
+	 * 		and {@link org.objectweb.asm.signature.SignatureReader#acceptType(SignatureVisitor)} ({@code true}) for usage.
 	 *
 	 * @return {@code true} for a valid signature. Will be {@code false} otherwise, or for {@code null} values.
 	 */
 	public static boolean isValidSignature(@Nullable String signature, boolean isTypeSignature) {
-		if (signature == null)
+		if (signature == null || signature.isEmpty())
 			return false;
 		try {
 			SignatureReader signatureReader = new SignatureReader(signature);

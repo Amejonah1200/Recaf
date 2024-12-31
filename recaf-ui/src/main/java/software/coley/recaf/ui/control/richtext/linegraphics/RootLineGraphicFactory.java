@@ -1,10 +1,12 @@
 package software.coley.recaf.ui.control.richtext.linegraphics;
 
 import jakarta.annotation.Nonnull;
-import javafx.scene.Cursor;
 import javafx.scene.Node;
 import javafx.scene.layout.BorderPane;
 import software.coley.recaf.ui.control.richtext.Editor;
+import software.coley.recaf.ui.control.richtext.bracket.BracketMatchGraphicFactory;
+import software.coley.recaf.ui.control.richtext.problem.ProblemGutterGraphicFactory;
+import software.coley.recaf.ui.control.richtext.problem.ProblemSquiggleGraphicFactory;
 
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -32,16 +34,30 @@ public class RootLineGraphicFactory extends AbstractLineGraphicFactory implement
 	}
 
 	/**
+	 * Adds the default graphic factories used for editor displays when the content is code.
+	 */
+	public void addDefaultCodeGraphicFactories() {
+		addLineGraphicFactories(
+				new BracketMatchGraphicFactory(),
+				new ProblemGutterGraphicFactory(),
+				new ProblemSquiggleGraphicFactory()
+		);
+	}
+
+	/**
+	 * Adds the given factories.
+	 *
 	 * @param factories
 	 * 		Graphic factories to add.
 	 */
 	public void addLineGraphicFactories(LineGraphicFactory... factories) {
-		for (LineGraphicFactory factory : factories) {
+		for (LineGraphicFactory factory : factories)
 			addLineGraphicFactory(factory);
-		}
 	}
 
 	/**
+	 * Adds the given factory.
+	 *
 	 * @param factory
 	 * 		Graphic factory to add.
 	 */
@@ -79,7 +95,11 @@ public class RootLineGraphicFactory extends AbstractLineGraphicFactory implement
 		// Wrap so the padding of the HBox expands the space of the 'lineno'.
 		BorderPane wrapper = new BorderPane(lineContainer);
 		wrapper.getStyleClass().add("lineno");
-		wrapper.setCursor(Cursor.DEFAULT);
+		// Note: The dimensions you will see on 'wrapper' do not appear to map its effective bounds.
+		// We used to set the cursor to DEFAULT here, but this led to the editor's TEXT cursor being
+		// replaced even when the visible bounds of this wrapper were not intersected with, and all
+		// sub-nodes of the wrapper were marked as mouse-transparent.
+		// The solution for now seems to just not specify a cursor.
 		return wrapper;
 	}
 

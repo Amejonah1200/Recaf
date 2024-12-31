@@ -28,21 +28,19 @@ import org.slf4j.Logger;
 import software.coley.recaf.analytics.logging.Logging;
 import software.coley.recaf.services.compile.CompilerDiagnostic;
 import software.coley.recaf.services.file.RecafDirectoriesConfig;
+import software.coley.recaf.services.info.association.FileTypeSyntaxAssociationService;
 import software.coley.recaf.services.script.ScriptEngine;
 import software.coley.recaf.services.script.ScriptFile;
 import software.coley.recaf.services.script.ScriptManager;
 import software.coley.recaf.services.script.ScriptManagerConfig;
-import software.coley.recaf.services.info.association.FileTypeAssociationService;
 import software.coley.recaf.services.window.WindowFactory;
 import software.coley.recaf.ui.config.KeybindingConfig;
 import software.coley.recaf.ui.control.ActionButton;
 import software.coley.recaf.ui.control.FontIconView;
 import software.coley.recaf.ui.control.richtext.Editor;
 import software.coley.recaf.ui.control.richtext.ScrollbarPaddingUtil;
-import software.coley.recaf.ui.control.richtext.bracket.BracketMatchGraphicFactory;
 import software.coley.recaf.ui.control.richtext.bracket.SelectedBracketTracking;
 import software.coley.recaf.ui.control.richtext.problem.Problem;
-import software.coley.recaf.ui.control.richtext.problem.ProblemGraphicFactory;
 import software.coley.recaf.ui.control.richtext.problem.ProblemPhase;
 import software.coley.recaf.ui.control.richtext.problem.ProblemTracking;
 import software.coley.recaf.ui.control.richtext.search.SearchBar;
@@ -71,7 +69,7 @@ public class ScriptManagerPane extends BorderPane {
 	private final ScriptManager scriptManager;
 	private final ScriptManagerConfig config;
 	private final ScriptEngine engine;
-	private final FileTypeAssociationService associationService;
+	private final FileTypeSyntaxAssociationService languageAssociation;
 	private final WindowFactory windowFactory;
 	private final RecafDirectoriesConfig directories;
 	private final KeybindingConfig keys;
@@ -79,18 +77,18 @@ public class ScriptManagerPane extends BorderPane {
 
 	@Inject
 	public ScriptManagerPane(@Nonnull ScriptManagerConfig config,
-							 @Nonnull ScriptManager scriptManager,
-							 @Nonnull ScriptEngine engine,
-							 @Nonnull FileTypeAssociationService associationService,
-							 @Nonnull WindowFactory windowFactory,
-							 @Nonnull RecafDirectoriesConfig directories,
-							 @Nonnull KeybindingConfig keys,
-							 @Nonnull Instance<SearchBar> searchBarProvider) {
+	                         @Nonnull ScriptManager scriptManager,
+	                         @Nonnull ScriptEngine engine,
+	                         @Nonnull FileTypeSyntaxAssociationService languageAssociation,
+	                         @Nonnull WindowFactory windowFactory,
+	                         @Nonnull RecafDirectoriesConfig directories,
+	                         @Nonnull KeybindingConfig keys,
+	                         @Nonnull Instance<SearchBar> searchBarProvider) {
 		this.windowFactory = windowFactory;
 		this.scriptManager = scriptManager;
 		this.config = config;
 		this.engine = engine;
-		this.associationService = associationService;
+		this.languageAssociation = languageAssociation;
 		this.directories = directories;
 		this.keys = keys;
 		this.searchBarProvider = searchBarProvider;
@@ -140,7 +138,7 @@ public class ScriptManagerPane extends BorderPane {
 	 * 		Script to edit.
 	 */
 	private void editScript(@Nonnull ScriptFile script) {
-		ScriptEditor scriptEditor = new ScriptEditor(associationService, script.source(), searchBarProvider.get())
+		ScriptEditor scriptEditor = new ScriptEditor(languageAssociation, script.source(), searchBarProvider.get())
 				.withPath(script.path());
 		Scene scene = new RecafScene(scriptEditor, 750, 400);
 		windowFactory.createAnonymousStage(scene, getBinding("menu.scripting.editor"), 750, 400).show();
@@ -162,7 +160,7 @@ public class ScriptManagerPane extends BorderPane {
 								
 				System.out.println("Hello world");
 				""";
-		ScriptEditor scriptEditor = new ScriptEditor(associationService, template, searchBarProvider.get());
+		ScriptEditor scriptEditor = new ScriptEditor(languageAssociation, template, searchBarProvider.get());
 		Scene scene = new RecafScene(scriptEditor, 750, 400);
 		windowFactory.createAnonymousStage(scene, getBinding("menu.scripting.editor"), 750, 400).show();
 	}
@@ -186,16 +184,13 @@ public class ScriptManagerPane extends BorderPane {
 		private final Editor editor = new Editor();
 		private Path scriptPath;
 
-		private ScriptEditor(@Nonnull FileTypeAssociationService associationService, @Nonnull String initialText, @Nonnull SearchBar searchBar) {
+		private ScriptEditor(@Nonnull FileTypeSyntaxAssociationService associationService, @Nonnull String initialText, @Nonnull SearchBar searchBar) {
 			editor.setText(initialText);
 			editor.getCodeArea().getUndoManager().forgetHistory();
 			associationService.configureEditorSyntax("java", editor);
 			editor.setSelectedBracketTracking(new SelectedBracketTracking());
 			editor.setProblemTracking(problemTracking);
-			editor.getRootLineGraphicFactory().addLineGraphicFactories(
-					new BracketMatchGraphicFactory(),
-					new ProblemGraphicFactory()
-			);
+			editor.getRootLineGraphicFactory().addDefaultCodeGraphicFactories();
 
 			// Add extra components
 			searchBar.install(editor);
@@ -248,9 +243,11 @@ public class ScriptManagerPane extends BorderPane {
 
 				// Write to disk regardless, if path is given. If not given, prompt user for it.
 				if (scriptPath == null) {
-					FileChooser chooser = new FileChooser();
-					chooser.setInitialDirectory(directories.getScriptsDirectory().toFile());
-					chooser.setTitle(Lang.get("dialog.file.save"));
+					FileChooser chooser = new FileChooserBuilder()
+							.setInitialDirectory(directories.getScriptsDirectory())
+							.setTitle(Lang.get("dialog.file.save"))
+							.build();
+
 					File selected = chooser.showSaveDialog(getScene().getWindow());
 					if (selected != null)
 						scriptPath = selected.toPath();

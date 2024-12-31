@@ -9,6 +9,8 @@ import jakarta.annotation.Nonnull;
  * 		Line the message applies to.
  * @param column
  * 		Column the message applies to within the line.
+ * @param length
+ * 		Length beyond the column position where the message applies to.
  * @param message
  * 		Message detailing the problem.
  * @param level
@@ -16,7 +18,7 @@ import jakarta.annotation.Nonnull;
  *
  * @author Matt Coley
  */
-public record CompilerDiagnostic(int line, int column, @Nonnull String message, @Nonnull Level level) {
+public record CompilerDiagnostic(int line, int column, int length, @Nonnull String message, @Nonnull Level level) {
 	/**
 	 * @param line
 	 * 		New line number.
@@ -25,7 +27,7 @@ public record CompilerDiagnostic(int line, int column, @Nonnull String message, 
 	 */
 	@Nonnull
 	public CompilerDiagnostic withLine(int line) {
-		return new CompilerDiagnostic(line, column, message, level);
+		return new CompilerDiagnostic(line, column, length, message, level);
 	}
 
 	@Override

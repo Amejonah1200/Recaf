@@ -26,6 +26,7 @@ import javafx.scene.layout.Priority;
 import org.fxmisc.richtext.CodeArea;
 import org.kordamp.ikonli.carbonicons.CarbonIcons;
 import regexodus.Matcher;
+import software.coley.collections.Lists;
 import software.coley.recaf.ui.config.KeybindingConfig;
 import software.coley.recaf.ui.control.AbstractSearchBar;
 import software.coley.recaf.ui.control.ActionButton;
@@ -45,6 +46,7 @@ import java.util.List;
 @Dependent
 public class SearchBar implements EditorComponent, EventHandler<KeyEvent> {
 	private final KeybindingConfig keys;
+	private Editor editor;
 	private FindAndReplaceSearchBar bar;
 
 	@Inject
@@ -54,6 +56,7 @@ public class SearchBar implements EditorComponent, EventHandler<KeyEvent> {
 
 	@Override
 	public void install(@Nonnull Editor editor) {
+		this.editor = editor;
 		bar = new FindAndReplaceSearchBar(editor);
 		NodeEvents.addKeyPressHandler(editor, this);
 	}
@@ -63,6 +66,7 @@ public class SearchBar implements EditorComponent, EventHandler<KeyEvent> {
 		editor.setTop(null);
 		NodeEvents.removeKeyPressHandler(editor, this);
 		bar = null;
+		this.editor = null;
 	}
 
 	@Override
@@ -72,6 +76,12 @@ public class SearchBar implements EditorComponent, EventHandler<KeyEvent> {
 			if (!bar.isVisible())
 				bar.show();
 
+			// Update input text based on current selection
+			if (editor != null) {
+				String selectedText = editor.getCodeArea().getSelectedText();
+				if (!selectedText.isEmpty()) bar.getSearchTextProperty().setValue(selectedText);
+			}
+
 			// Grab focus
 			bar.requestSearchFocus();
 			bar.hideReplace();
@@ -79,6 +89,12 @@ public class SearchBar implements EditorComponent, EventHandler<KeyEvent> {
 			// Show if not visible
 			if (!bar.isVisible())
 				bar.show();
+
+			// Update input text based on current selection
+			if (editor != null) {
+				String selectedText = editor.getCodeArea().getSelectedText();
+				if (!selectedText.isEmpty()) bar.getSearchTextProperty().setValue(selectedText);
+			}
 
 			// Grab focus
 			bar.requestSearchFocus();
@@ -277,7 +293,7 @@ public class SearchBar implements EditorComponent, EventHandler<KeyEvent> {
 				int lastMatchedTerm = area.getSelectedText().length();
 				int caret = area.getCaretPosition();
 				int searchStart = Math.max(0, caret - lastMatchedTerm - 1);
-				int rangeIndex = CollectionUtil.sortedInsertIndex(resultRanges, Match.match(searchStart, searchStart));
+				int rangeIndex = Lists.sortedInsertIndex(resultRanges, Match.match(searchStart, searchStart));
 				if (rangeIndex >= resultRanges.size())
 					rangeIndex = 0;
 				lastResultIndex.set(rangeIndex);
@@ -346,7 +362,7 @@ public class SearchBar implements EditorComponent, EventHandler<KeyEvent> {
 			// Get the next range index by doing a search starting from the current caret position + 1.
 			CodeArea area = editor.getCodeArea();
 			int caret = area.getCaretPosition() + 1;
-			int rangeIndex = CollectionUtil.sortedInsertIndex(resultRanges, Match.match(caret, caret));
+			int rangeIndex = Lists.sortedInsertIndex(resultRanges, Match.match(caret, caret));
 			if (rangeIndex >= resultRanges.size())
 				rangeIndex = 0;
 
@@ -372,7 +388,7 @@ public class SearchBar implements EditorComponent, EventHandler<KeyEvent> {
 			// then go back by one position, wrapping around if necessary.
 			CodeArea area = editor.getCodeArea();
 			int caret = area.getCaretPosition();
-			int rangeIndex = CollectionUtil.sortedInsertIndex(resultRanges, Match.match(caret - area.getSelectedText().length(), caret)) - 1;
+			int rangeIndex = Lists.sortedInsertIndex(resultRanges, Match.match(caret - area.getSelectedText().length(), caret)) - 1;
 			if (rangeIndex < 0)
 				rangeIndex = resultRanges.size() - 1;
 

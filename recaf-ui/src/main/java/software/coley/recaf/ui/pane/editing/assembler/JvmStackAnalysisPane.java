@@ -3,6 +3,7 @@ package software.coley.recaf.ui.pane.editing.assembler;
 import atlantafx.base.theme.Styles;
 import atlantafx.base.theme.Tweaks;
 import dev.xdark.blw.type.ClassType;
+import dev.xdark.blw.type.Types;
 import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
 import jakarta.enterprise.context.Dependent;
@@ -13,6 +14,7 @@ import javafx.scene.control.SplitPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import me.darknet.assembler.ast.ASTElement;
+import me.darknet.assembler.ast.primitive.ASTCode;
 import me.darknet.assembler.ast.primitive.ASTEmpty;
 import me.darknet.assembler.ast.primitive.ASTInstruction;
 import me.darknet.assembler.ast.specific.ASTClass;
@@ -26,9 +28,11 @@ import me.darknet.assembler.parser.TokenType;
 import me.darknet.assembler.util.Location;
 import me.darknet.assembler.util.Range;
 import org.reactfx.EventStreams;
+import org.slf4j.Logger;
 import software.coley.collections.Lists;
+import software.coley.recaf.analytics.logging.Logging;
 import software.coley.recaf.services.cell.CellConfigurationService;
-import software.coley.recaf.ui.config.TextFormatConfig;
+import software.coley.recaf.services.text.TextFormatConfig;
 import software.coley.recaf.ui.control.richtext.Editor;
 import software.coley.recaf.util.FxThreadUtil;
 import software.coley.recaf.util.Lang;
@@ -44,6 +48,7 @@ import java.util.*;
  */
 @Dependent
 public class JvmStackAnalysisPane extends AstBuildConsumerComponent {
+	private static final Logger logger = Logging.get(JvmStackAnalysisPane.class);
 	private final SimpleObjectProperty<Object> notifyQueue = new SimpleObjectProperty<>(new Object());
 	private final TableView<JvmVariableState> varTable = new TableView<>();
 	private final TableView<JvmStackState> stackTable = new TableView<>();
@@ -52,13 +57,13 @@ public class JvmStackAnalysisPane extends AstBuildConsumerComponent {
 	@Inject
 	@SuppressWarnings("unchecked")
 	public JvmStackAnalysisPane(@Nonnull CellConfigurationService cellConfigurationService,
-								@Nonnull TextFormatConfig formatConfig,
-								@Nonnull Workspace workspace) {
+	                            @Nonnull TextFormatConfig formatConfig,
+	                            @Nonnull Workspace workspace) {
 		TableColumn<JvmVariableState, String> columnName = new TableColumn<>(Lang.get("assembler.variables.name"));
 		TableColumn<JvmVariableState, ClassType> columnType = new TableColumn<>(Lang.get("assembler.variables.type"));
 		TableColumn<JvmVariableState, ValueTableCell.ValueWrapper> columnValue = new TableColumn<>(Lang.get("assembler.variables.value"));
 		columnName.setCellValueFactory(param -> new SimpleStringProperty(param.getValue().name));
-		columnType.setCellValueFactory(param -> new SimpleObjectProperty<>(param.getValue().type));
+		columnType.setCellValueFactory(param -> new SimpleObjectProperty<>(param.getValue().value instanceof Value.NullValue ? TypeTableCell.NULL_TYPE : param.getValue().type));
 		columnValue.setCellValueFactory(param -> new SimpleObjectProperty<>(new ValueTableCell.ValueWrapper(param.getValue().value, param.getValue().priorValue)));
 		columnType.setCellFactory(param -> new TypeTableCell<>(cellConfigurationService, formatConfig, workspace));
 		columnValue.setCellFactory(param -> new ValueTableCell<>());
@@ -66,7 +71,7 @@ public class JvmStackAnalysisPane extends AstBuildConsumerComponent {
 
 		TableColumn<JvmStackState, ClassType> columnTypeStack = new TableColumn<>(Lang.get("assembler.analysis.type"));
 		TableColumn<JvmStackState, ValueTableCell.ValueWrapper> columnValueStack = new TableColumn<>(Lang.get("assembler.analysis.value"));
-		columnTypeStack.setCellValueFactory(param -> new SimpleObjectProperty<>(param.getValue().type));
+		columnTypeStack.setCellValueFactory(param -> new SimpleObjectProperty<>(param.getValue().value instanceof Value.NullValue ? TypeTableCell.NULL_TYPE : param.getValue().type));
 		columnValueStack.setCellValueFactory(param -> new SimpleObjectProperty<>(new ValueTableCell.ValueWrapper(param.getValue().value, param.getValue().priorValue)));
 		columnTypeStack.setCellFactory(param -> new TypeTableCell<>(cellConfigurationService, formatConfig, workspace));
 		columnValueStack.setCellFactory(param -> new ValueTableCell<>());
@@ -82,7 +87,13 @@ public class JvmStackAnalysisPane extends AstBuildConsumerComponent {
 
 		EventStreams.changesOf(notifyQueue)
 				.reduceSuccessions(Collections::singletonList, Lists::add, Duration.ofMillis(Editor.SHORTER_DELAY_MS))
-				.addObserver(unused -> updateTable());
+				.addObserver(unused -> {
+					try {
+						updateTable();
+					} catch (Throwable t) {
+						logger.error("Error updating stack analysis table", t);
+					}
+				});
 	}
 
 	private void updateTable() {
@@ -144,7 +155,7 @@ public class JvmStackAnalysisPane extends AstBuildConsumerComponent {
 			for (ClassType classType : typedFrame.getStack())
 				stackItems.add(new JvmStackState(classType, Values.valueOf(classType), null));
 			for (Local local : typedFrame.getLocals().values())
-				varItems.add(new JvmVariableState(local.name(), local.type(), Values.valueOf(local.type()), null));
+				varItems.add(new JvmVariableState(local.name(), local.safeType(), Values.valueOf(local.safeType()), null));
 		} else if (thisFrame instanceof ValuedFrame valuedFrame) {
 			// Value analysis will not only track values in a frame, but also let us see if values change across frames
 			ValuedFrame lastFrame = entryKey == 0 ? null : (ValuedFrame) frames.floorEntry(entryKey - 1).getValue();
@@ -155,7 +166,7 @@ public class JvmStackAnalysisPane extends AstBuildConsumerComponent {
 			for (int i = 0; i < stack.length; i++) {
 				Value lastValue = i <= lastStack.length - 1 ? lastStack[i] : null;
 				Value value = stack[i];
-				stackItems.add(new JvmStackState(value.type(), value, lastValue));
+				stackItems.add(new JvmStackState(Objects.requireNonNullElse(value.type(), Types.OBJECT), value, lastValue));
 			}
 
 			// And fill out the variables.
@@ -163,7 +174,7 @@ public class JvmStackAnalysisPane extends AstBuildConsumerComponent {
 			Map<Integer, ValuedLocal> locals = valuedFrame.getLocals();
 			for (ValuedLocal local : locals.values()) {
 				ValuedLocal lastLocal = lastLocals.get(local.index());
-				varItems.add(new JvmVariableState(local.name(), local.type(), local.value(),
+				varItems.add(new JvmVariableState(local.name(), local.safeType(), local.value(),
 						lastLocal == null ? null : lastLocal.value()));
 			}
 		}
@@ -175,7 +186,10 @@ public class JvmStackAnalysisPane extends AstBuildConsumerComponent {
 		int pos = editor.getCodeArea().getCaretPosition();
 		if (!method.range().within(pos))
 			return -1;
-		List<ASTInstruction> instructions = method.code().instructions();
+		ASTCode code = method.code();
+		if (code == null)
+			return -1;
+		List<ASTInstruction> instructions = code.instructions();
 		int paragraph = editor.getCodeArea().getCurrentParagraph();
 		int result = Collections.binarySearch(instructions, new ASTEmpty(new Token(
 				new Range(pos, pos + 1),
@@ -194,10 +208,12 @@ public class JvmStackAnalysisPane extends AstBuildConsumerComponent {
 	}
 
 	private void clearData() {
-		stackTable.setDisable(true);
-		varTable.setDisable(true);
-		stackTable.getItems().clear();
-		varTable.getItems().clear();
+		FxThreadUtil.run(() -> {
+			stackTable.setDisable(true);
+			varTable.setDisable(true);
+			stackTable.getItems().clear();
+			varTable.getItems().clear();
+		});
 		lastInsnIndex = -1;
 	}
 
@@ -249,7 +265,7 @@ public class JvmStackAnalysisPane extends AstBuildConsumerComponent {
 	 * 		Prior state in previous frame, if known.
 	 */
 	private record JvmVariableState(@Nonnull String name, @Nonnull ClassType type, @Nonnull Value value,
-									@Nullable Value priorValue) {}
+	                                @Nullable Value priorValue) {}
 
 	/**
 	 * Models an item on the stack.

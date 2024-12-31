@@ -4,6 +4,7 @@ import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
 import software.coley.recaf.info.ClassInfo;
 import software.coley.recaf.info.member.FieldMember;
+import software.coley.recaf.info.member.LocalVariable;
 import software.coley.recaf.info.member.MethodMember;
 import software.coley.recaf.workspace.model.Workspace;
 
@@ -18,6 +19,7 @@ public class IncrementingNameGenerator implements DeconflictingNameGenerator {
 	private long classIndex = 1;
 	private long fieldIndex = 1;
 	private long methodIndex = 1;
+	private long varIndex = 1;
 
 	@Nonnull
 	private String nextClassName() {
@@ -32,6 +34,11 @@ public class IncrementingNameGenerator implements DeconflictingNameGenerator {
 	@Nonnull
 	private String nextMethodName() {
 		return "method" + methodIndex++;
+	}
+
+	@Nonnull
+	private String nextVarName() {
+		return "var" + varIndex++;
 	}
 
 	@Override
@@ -66,7 +73,13 @@ public class IncrementingNameGenerator implements DeconflictingNameGenerator {
 		String name = nextMethodName();
 		String descriptor = method.getDescriptor();
 		while (owner.getDeclaredMethod(name, descriptor) != null)
-			name = nextFieldName();
+			name = nextMethodName();
 		return name;
+	}
+
+	@Nonnull
+	@Override
+	public String mapVariable(@Nonnull ClassInfo owner, @Nonnull MethodMember declaringMethod, @Nonnull LocalVariable variable) {
+		return nextVarName();
 	}
 }

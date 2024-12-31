@@ -26,23 +26,20 @@ public class SinkFactoryImpl implements OutputSinkFactory {
 
 	@Override
 	public <T> Sink<T> getSink(SinkType sinkType, SinkClass sinkClass) {
-		switch (sinkType) {
-			case JAVA:
-				return this::setDecompilation;
-			case EXCEPTION:
-				return this::handleException;
-			case SUMMARY:
-			case PROGRESS:
-			default:
-				return t -> {
-				};
-		}
+		return switch (sinkType) {
+			case JAVA -> this::setDecompilation;
+			case EXCEPTION -> this::handleException;
+			default -> t -> {
+			};
+		};
 	}
 
-	private <T> void handleException(T value) {
-		logger.error("CFR Error: {}", value);
+	private <T> void handleException(@Nullable T value) {
 		if (value instanceof Throwable) {
+			logger.error("CFR Error: {}", value);
 			exception = (Throwable) value;
+		} else {
+			logger.error("CFR encountered an error but provided no additional information");
 		}
 	}
 

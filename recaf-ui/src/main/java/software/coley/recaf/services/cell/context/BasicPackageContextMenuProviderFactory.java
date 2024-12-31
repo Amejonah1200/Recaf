@@ -54,7 +54,6 @@ public class BasicPackageContextMenuProviderFactory extends AbstractContextMenuP
 			var builder = new ContextMenuBuilder(menu, source).forDirectory(workspace, resource, bundle, packageName);
 
 			if (source.isDeclaration()) {
-				builder.item("menu.tab.copypath", COPY_LINK, () -> ClipboardUtil.copyString(packageName));
 				if (bundle instanceof JvmClassBundle) {
 					var jvmBuilder = builder.cast(JvmClassBundle.class);
 					jvmBuilder.directoryItem("menu.edit.copy", COPY_FILE, actions::copyPackage);
@@ -63,21 +62,26 @@ public class BasicPackageContextMenuProviderFactory extends AbstractContextMenuP
 					var refactor = jvmBuilder.submenu("menu.refactor", PAINT_BRUSH);
 					refactor.directoryItem("menu.refactor.move", STACKED_MOVE, actions::movePackage);
 					refactor.directoryItem("menu.refactor.rename", TAG_EDIT, actions::renamePackage);
-				}
 
-				// Search actions
-				var search = builder.submenu("menu.search", SEARCH);
-				search.item("menu.search.class.member-references", CODE_REFERENCE, () -> {
-					MemberReferenceSearchPane pane = actions.openNewMemberReferenceSearch();
-					pane.ownerPredicateIdProperty().setValue(StringPredicateProvider.KEY_STARTS_WITH);
-					pane.ownerValueProperty().setValue(packageName + "/");
-				});
-				search.item("menu.search.class.type-references", CODE_REFERENCE, () -> {
-					ClassReferenceSearchPane pane = actions.openNewClassReferenceSearch();
-					pane.typePredicateIdProperty().setValue(StringPredicateProvider.KEY_STARTS_WITH);
-					pane.typeValueProperty().setValue(packageName + "/");
-				});
+					jvmBuilder.directoryItem("menu.export.package", EXPORT, actions::exportPackage);
+				}
 			}
+
+			// Search actions
+			var search = builder.submenu("menu.search", SEARCH);
+			search.item("menu.search.class.member-references", CODE_REFERENCE, () -> {
+				MemberReferenceSearchPane pane = actions.openNewMemberReferenceSearch();
+				pane.ownerPredicateIdProperty().setValue(StringPredicateProvider.KEY_STARTS_WITH);
+				pane.ownerValueProperty().setValue(packageName + "/");
+			});
+			search.item("menu.search.class.type-references", CODE_REFERENCE, () -> {
+				ClassReferenceSearchPane pane = actions.openNewClassReferenceSearch();
+				pane.typePredicateIdProperty().setValue(StringPredicateProvider.KEY_STARTS_WITH);
+				pane.typeValueProperty().setValue(packageName + "/");
+			});
+
+			// Copy path
+			builder.item("menu.tab.copypath", COPY_LINK, () -> ClipboardUtil.copyString(packageName));
 
 			return menu;
 		};

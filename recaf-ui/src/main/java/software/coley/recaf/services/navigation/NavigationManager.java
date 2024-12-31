@@ -9,6 +9,7 @@ import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.scene.Node;
 import org.slf4j.Logger;
+import software.coley.collections.Unchecked;
 import software.coley.recaf.analytics.logging.Logging;
 import software.coley.recaf.cdi.EagerInitialization;
 import software.coley.recaf.cdi.InitializationStage;
@@ -16,14 +17,21 @@ import software.coley.recaf.info.AndroidClassInfo;
 import software.coley.recaf.info.FileInfo;
 import software.coley.recaf.info.JvmClassInfo;
 import software.coley.recaf.info.properties.builtin.RemapOriginTaskProperty;
-import software.coley.recaf.path.*;
+import software.coley.recaf.path.AbstractPathNode;
+import software.coley.recaf.path.BundlePathNode;
+import software.coley.recaf.path.ClassPathNode;
+import software.coley.recaf.path.FilePathNode;
+import software.coley.recaf.path.PathNode;
+import software.coley.recaf.path.PathNodes;
+import software.coley.recaf.path.WorkspacePathNode;
 import software.coley.recaf.services.Service;
 import software.coley.recaf.services.mapping.MappingResults;
+import software.coley.recaf.services.workspace.WorkspaceManager;
 import software.coley.recaf.ui.docking.DockingManager;
 import software.coley.recaf.ui.docking.DockingTab;
-import software.coley.recaf.services.workspace.WorkspaceManager;
-import software.coley.recaf.workspace.model.WorkspaceModificationListener;
+import software.coley.recaf.util.FxThreadUtil;
 import software.coley.recaf.workspace.model.Workspace;
+import software.coley.recaf.workspace.model.WorkspaceModificationListener;
 import software.coley.recaf.workspace.model.bundle.AndroidClassBundle;
 import software.coley.recaf.workspace.model.bundle.FileBundle;
 import software.coley.recaf.workspace.model.bundle.JvmClassBundle;
@@ -32,7 +40,13 @@ import software.coley.recaf.workspace.model.resource.ResourceFileListener;
 import software.coley.recaf.workspace.model.resource.ResourceJvmClassListener;
 import software.coley.recaf.workspace.model.resource.WorkspaceResource;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Tracks available {@link Navigable} content currently open in the UI.
@@ -49,17 +63,19 @@ import java.util.*;
 public class NavigationManager implements Navigable, Service {
 	public static final String ID = "navigation";
 	private static final Logger logger = Logging.get(NavigationManager.class);
-	private final List<Navigable> children = new ArrayList<>();
-	private final Map<Navigable, DockingTab> childrenToTab = new IdentityHashMap<>();
-	private final Map<DockingTab, NavigableSpy> tabToSpy = new IdentityHashMap<>();
+	private final List<Navigable> children = new CopyOnWriteArrayList<>();
+	private final List<NavigableAddListener> addListeners = new CopyOnWriteArrayList<>();
+	private final List<NavigableRemoveListener> removeListeners = new CopyOnWriteArrayList<>();
+	private final Map<Navigable, DockingTab> childrenToTab = Collections.synchronizedMap(new IdentityHashMap<>());
+	private final Map<DockingTab, NavigableSpy> tabToSpy = Collections.synchronizedMap(new IdentityHashMap<>());
 	private final Forwarding forwarding = new Forwarding();
 	private final NavigationManagerConfig config;
 	private PathNode<?> path = new DummyInitialNode();
 
 	@Inject
 	public NavigationManager(@Nonnull NavigationManagerConfig config,
-							 @Nonnull DockingManager dockingManager,
-							 @Nonnull WorkspaceManager workspaceManager) {
+	                         @Nonnull DockingManager dockingManager,
+	                         @Nonnull WorkspaceManager workspaceManager) {
 		this.config = config;
 
 		// Track what navigable content is available.
@@ -92,8 +108,8 @@ public class NavigationManager implements Navigable, Service {
 		}));
 
 		// When the workspace closes, close all associated children.
-		workspaceManager.addWorkspaceCloseListener(workspace -> {
-			for (Navigable child : new HashSet<>(children)) {
+		workspaceManager.addWorkspaceCloseListener(workspace -> FxThreadUtil.run(() -> {
+			for (Navigable child : children) {
 				child.disable();
 				DockingTab dockingTab = childrenToTab.get(child);
 				if (dockingTab != null)
@@ -112,7 +128,7 @@ public class NavigationManager implements Navigable, Service {
 
 			// Remove the path reference to the old workspace.
 			forwarding.workspacePath = null;
-			path = null;
+			path = new DummyInitialNode();
 
 			// Force close any remaining tabs that hold navigable content.
 			for (DockingTab tab : dockingManager.getDockTabs()) {
@@ -122,16 +138,18 @@ public class NavigationManager implements Navigable, Service {
 					tab.close();
 				}
 			}
-		});
+		}));
 
 		// Track current workspace so that we are navigable ourselves.
-		workspaceManager.addWorkspaceOpenListener(workspace -> {
+		// Nothing here *needs* to be on the FX thread per-say, but because the closer handling logic is on the FX
+		// thread making this also on the FX thread will help prevent race conditions on assigning the 'path' field.
+		workspaceManager.addWorkspaceOpenListener(workspace -> FxThreadUtil.run(() -> {
 			WorkspacePathNode workspacePath = PathNodes.workspacePath(workspace);
 			path = workspacePath;
 
 			// Update forwarding's path.
 			forwarding.workspacePath = workspacePath;
-		});
+		}));
 
 		// Setup forwarding workspace updates to children.
 		workspaceManager.addDefaultWorkspaceModificationListeners(new WorkspaceModificationListener() {
@@ -151,6 +169,46 @@ public class NavigationManager implements Navigable, Service {
 		});
 	}
 
+	/**
+	 * Add a listener that observes the addition of {@link Navigable} components to the UI.
+	 *
+	 * @param listener
+	 * 		Listener to add.
+	 */
+	public void addNavigableAddListener(@Nonnull NavigableAddListener listener) {
+		addListeners.add(listener);
+	}
+
+	/**
+	 * Remove a listener that observes the addition of {@link Navigable} components to the UI.
+	 *
+	 * @param listener
+	 * 		Listener to remove.
+	 */
+	public void removeNavigableAddListener(@Nonnull NavigableAddListener listener) {
+		addListeners.remove(listener);
+	}
+
+	/**
+	 * Add a listener that observes the removal of {@link Navigable} components to the UI.
+	 *
+	 * @param listener
+	 * 		Listener to add.
+	 */
+	public void addNavigableRemoveListener(@Nonnull NavigableRemoveListener listener) {
+		removeListeners.add(listener);
+	}
+
+	/**
+	 * Remove a listener that observes the removal of {@link Navigable} components to the UI.
+	 *
+	 * @param listener
+	 * 		Listener to remove.
+	 */
+	public void removeNavigableRemoveListener(@Nonnull NavigableRemoveListener listener) {
+		removeListeners.remove(listener);
+	}
+
 	@Nonnull
 	@Override
 	public PathNode<?> getPath() {
@@ -160,7 +218,7 @@ public class NavigationManager implements Navigable, Service {
 	@Nonnull
 	@Override
 	public Collection<Navigable> getNavigableChildren() {
-		return children;
+		return Collections.unmodifiableCollection(children);
 	}
 
 	@Override
@@ -205,6 +263,8 @@ public class NavigationManager implements Navigable, Service {
 			if (value instanceof Navigable navigable && navigable.isTrackable()) {
 				children.add(navigable);
 				childrenToTab.put(navigable, tab);
+				Unchecked.checkedForEach(addListeners, listener -> listener.onAdd(navigable),
+						(listener, t) -> logger.error("Exception thrown when handling navigable added '{}'", navigable.getClass().getName(), t));
 			}
 		}
 
@@ -212,6 +272,8 @@ public class NavigationManager implements Navigable, Service {
 			if (value instanceof Navigable navigable) {
 				children.remove(navigable);
 				childrenToTab.remove(navigable);
+				Unchecked.checkedForEach(removeListeners, listener -> listener.onRemove(navigable),
+						(listener, t) -> logger.error("Exception thrown when handling navigable removed '{}'", navigable.getClass().getName(), t));
 
 				// For dependent beans, we are likely not going to see them ever again.
 				// Call disable to clean them up.
@@ -254,8 +316,10 @@ public class NavigationManager implements Navigable, Service {
 		@Override
 		public void onRemoveClass(@Nonnull WorkspaceResource resource, @Nonnull JvmClassBundle bundle, @Nonnull JvmClassInfo cls) {
 			ClassPathNode path = workspacePath.child(resource).child(bundle).child(cls.getPackageName()).child(cls);
-			for (Navigable navigable : getNavigableChildrenByPath(path))
-				navigable.disable();
+			FxThreadUtil.run(() -> {
+				for (Navigable navigable : getNavigableChildrenByPath(path))
+					navigable.disable();
+			});
 		}
 
 		@Override
@@ -275,8 +339,10 @@ public class NavigationManager implements Navigable, Service {
 		@Override
 		public void onRemoveClass(@Nonnull WorkspaceResource resource, @Nonnull AndroidClassBundle bundle, @Nonnull AndroidClassInfo cls) {
 			ClassPathNode path = workspacePath.child(resource).child(bundle).child(cls.getPackageName()).child(cls);
-			for (Navigable navigable : getNavigableChildrenByPath(path))
-				navigable.disable();
+			FxThreadUtil.run(() -> {
+				for (Navigable navigable : getNavigableChildrenByPath(path))
+					navigable.disable();
+			});
 		}
 
 		@Override
@@ -296,8 +362,10 @@ public class NavigationManager implements Navigable, Service {
 		@Override
 		public void onRemoveFile(@Nonnull WorkspaceResource resource, @Nonnull FileBundle bundle, @Nonnull FileInfo file) {
 			FilePathNode path = workspacePath.child(resource).child(bundle).child(file.getDirectoryName()).child(file);
-			for (Navigable navigable : getNavigableChildrenByPath(path))
-				navigable.disable();
+			FxThreadUtil.run(() -> {
+				for (Navigable navigable : getNavigableChildrenByPath(path))
+					navigable.disable();
+			});
 		}
 	}
 

@@ -12,6 +12,7 @@ import org.openrewrite.java.tree.J;
 import org.openrewrite.java.tree.Space;
 import org.openrewrite.marker.Marker;
 import org.openrewrite.marker.Range;
+import software.coley.collections.Unchecked;
 import software.coley.recaf.analytics.logging.DebuggingLogger;
 import software.coley.recaf.analytics.logging.Logging;
 import software.coley.recaf.util.StringDiff;
@@ -62,7 +63,7 @@ public class AstRangeMapper {
 			}
 			return cmp;
 		});
-		DiffHelper helper = backingText == null ? null : new DiffHelper(backingText, tree);
+		DiffHelper helper = backingText == null ? null : Unchecked.getOr(() -> new DiffHelper(backingText, tree), null);
 		PositionPrintOutputCapture ppoc = new PositionPrintOutputCapture(helper);
 		JavaPrinter<ExecutionContext> printer = new JavaPrinter<>() {
 			final JavaPrinter<ExecutionContext> spacePrinter = new JavaPrinter<>();
@@ -80,7 +81,10 @@ public class AstRangeMapper {
 				spacePrinter.visitSpace(t.getPrefix(), Space.Location.ANY, prefix);
 
 				Range.Position startPosition = new Range.Position(prefix.posInBacking, prefix.line, prefix.column);
-				t = super.visit(tree, outputCapture);
+				t = Unchecked.getOr(() ->super.visit(tree, outputCapture), null);
+				if (t == null) {
+					return null;
+				}
 				Range.Position endPosition = new Range.Position(ppoc.posInBacking, ppoc.line, ppoc.column);
 				Range range = new Range(randomId(), startPosition, endPosition);
 				rangeMap.put(range, t);
@@ -89,17 +93,17 @@ public class AstRangeMapper {
 			}
 
 			@Override
-			protected void visitModifier(@Nonnull J.Modifier modifier, PrintOutputCapture<ExecutionContext> p) {
+			public J visitModifier(@Nonnull J.Modifier modifier, PrintOutputCapture<ExecutionContext> p) {
 				PositionPrintOutputCapture prefix = new PositionPrintOutputCapture(ppoc);
 				spacePrinter.visitSpace(modifier.getPrefix(), Space.Location.ANY, prefix);
 
 				Range.Position startPosition = new Range.Position(prefix.posInBacking, prefix.line, prefix.column);
-				super.visitModifier(modifier, p);
+				J ret = super.visitModifier(modifier, p);
 				Range.Position endPosition = new Range.Position(ppoc.posInBacking, ppoc.line, ppoc.column);
 				Range range = new Range(randomId(), startPosition, endPosition);
 				rangeMap.put(range, modifier);
+				return ret;
 			}
-
 		};
 		printer.visit(tree, ppoc);
 

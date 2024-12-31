@@ -4,11 +4,13 @@ import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
 import software.coley.recaf.info.ClassInfo;
 import software.coley.recaf.info.member.FieldMember;
+import software.coley.recaf.info.member.LocalVariable;
 import software.coley.recaf.info.member.MethodMember;
+import software.coley.recaf.util.StringUtil;
 
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.List;
+
+import static software.coley.recaf.util.Keywords.getKeywords;
 
 /**
  * Filter that includes names that are reserved Java keywords.
@@ -16,8 +18,6 @@ import java.util.Set;
  * @author Matt Coley
  */
 public class IncludeKeywordNameFilter extends NameGeneratorFilter {
-	private static final Set<String> keywords = new HashSet<>();
-
 	/**
 	 * @param next
 	 * 		Next filter to link. Chaining filters allows for {@code thisFilter && nextFilter}.
@@ -28,71 +28,32 @@ public class IncludeKeywordNameFilter extends NameGeneratorFilter {
 
 	@Override
 	public boolean shouldMapClass(@Nonnull ClassInfo info) {
-		if (keywords.contains(info.getName()))
-			return true;
+		String name = info.getName();
+		List<String> parts = StringUtil.fastSplit(name, true, '/');
+		for (String part : parts)
+			if (getKeywords().contains(part))
+				return true;
 		return super.shouldMapClass(info);
 	}
 
 	@Override
 	public boolean shouldMapField(@Nonnull ClassInfo owner, @Nonnull FieldMember info) {
-		if (keywords.contains(info.getName()))
+		if (getKeywords().contains(info.getName()))
 			return true;
 		return super.shouldMapField(owner, info);
 	}
 
 	@Override
 	public boolean shouldMapMethod(@Nonnull ClassInfo owner, @Nonnull MethodMember info) {
-		if (keywords.contains(info.getName()))
+		if (getKeywords().contains(info.getName()))
 			return true;
 		return super.shouldMapMethod(owner, info);
 	}
 
-	static {
-		// Commented out items are 'keywords' but can be used as names.
-		keywords.addAll(Arrays.asList("abstract",
-				"assert",
-				"boolean",
-				"break",
-				// "bridge",
-				"byte",
-				"case",
-				"catch",
-				"char",
-				"class",
-				"const",
-				"continue",
-				"default",
-				"do",
-				"double",
-				"else",
-				"enum",
-				"extends",
-				"final",
-				"finally",
-				"float",
-				"for",
-				"goto",
-				"if",
-				"implements",
-				"import",
-				"instanceof",
-				"interface",
-				// "mandated",
-				// "module",
-				"native",
-				// "open",
-				"private",
-				"protected",
-				"public",
-				"static",
-				"strictfp",
-				"super",
-				"synchronized",
-				// "synthetic",
-				"transient",
-				// "transitive",
-				// "var",
-				// "varargs",
-				"volatile"));
+	@Override
+	public boolean shouldMapLocalVariable(@Nonnull ClassInfo owner, @Nonnull MethodMember declaringMethod, @Nonnull LocalVariable variable) {
+		if (getKeywords().contains(variable.getName()))
+			return true;
+		return super.shouldMapLocalVariable(owner, declaringMethod, variable);
 	}
 }

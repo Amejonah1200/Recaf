@@ -11,15 +11,18 @@ import software.coley.recaf.cdi.InitializationStage;
 import software.coley.recaf.launch.LaunchArguments;
 import software.coley.recaf.launch.LaunchCommand;
 import software.coley.recaf.launch.LaunchHandler;
-import software.coley.recaf.plugin.Plugin;
-import software.coley.recaf.plugin.PluginContainer;
 import software.coley.recaf.services.file.RecafDirectoriesConfig;
+import software.coley.recaf.services.plugin.PluginContainer;
+import software.coley.recaf.services.plugin.PluginException;
 import software.coley.recaf.services.plugin.PluginManager;
+import software.coley.recaf.services.plugin.discovery.DirectoryPluginDiscoverer;
 import software.coley.recaf.services.script.ScriptEngine;
-import software.coley.recaf.util.JFXValidation;
-import software.coley.recaf.util.Lang;
 import software.coley.recaf.services.workspace.WorkspaceManager;
 import software.coley.recaf.services.workspace.io.ResourceImporter;
+import software.coley.recaf.ui.config.WindowScaleConfig;
+import software.coley.recaf.util.JFXValidation;
+import software.coley.recaf.util.JdkValidation;
+import software.coley.recaf.util.Lang;
 import software.coley.recaf.workspace.model.BasicWorkspace;
 
 import java.io.File;
@@ -50,6 +53,10 @@ public class Main {
 	 * 		Application arguments.
 	 */
 	public static void main(String[] args) {
+		// Add a shutdown hook which dumps system information to console.
+		// Should provide useful information that users can copy/paste to us for diagnosing problems.
+		ExitDebugLoggingHook.register();
+
 		// Add a class reference for our UI module.
 		Bootstrap.setWeldConsumer(weld -> weld.addPackage(true, Main.class));
 
@@ -69,10 +76,13 @@ public class Main {
 		if (!launchArgValues.isHeadless()) {
 			int validationCode = JFXValidation.validateJFX();
 			if (validationCode != 0) {
-				System.exit(validationCode);
+				ExitDebugLoggingHook.exit(validationCode);
 				return;
 			}
 		}
+
+		// Validate we're on a JDK and not a JRE
+		JdkValidation.validateJdk();
 
 		// Invoke the bootstrapper, initializing the UI once the container is built.
 		recaf = Bootstrap.get();
@@ -105,8 +115,21 @@ public class Main {
 			initTranslations();
 			initPlugins();
 			fireInitEvent();
+			initScale(); // Needs to init after the init-event so config is loaded
 			RecafApplication.launch(RecafApplication.class, launchArgs.getArgs());
 		}
+	}
+
+	/**
+	 * Assigns UI scaling properties based on the window scale config.
+	 */
+	private static void initScale() {
+		WindowScaleConfig scaleConfig = recaf.get(WindowScaleConfig.class);
+
+		double scale = scaleConfig.getScale();
+		System.setProperty("sun.java2d.uiScale", String.format("%.0f%%", 100 * scale));
+		System.setProperty("glass.win.uiScale", String.valueOf(scale));
+		System.setProperty("glass.gtk.uiScale", String.valueOf(scale));
 	}
 
 	/**
@@ -177,19 +200,30 @@ public class Main {
 	 * Load plugins.
 	 */
 	private static void initPlugins() {
-		// Plugin loading is handled in the implementation's @PostConstruct handler
 		PluginManager pluginManager = recaf.get(PluginManager.class);
 
+		// Load from the plugin directory
+		try {
+			RecafDirectoriesConfig dirConfig = recaf.get(RecafDirectoriesConfig.class);
+			Path pluginDirectory = dirConfig.getPluginDirectory();
+			Path extraPluginDirectory = dirConfig.getExtraPluginDirectory();
+			pluginManager.loadPlugins(new DirectoryPluginDiscoverer(pluginDirectory));
+			if (extraPluginDirectory != null)
+				pluginManager.loadPlugins(new DirectoryPluginDiscoverer(extraPluginDirectory));
+		} catch (PluginException ex) {
+			logger.error("Failed to initialize plugins", ex);
+		}
+
 		// Log the discovered plugins
-		Collection<PluginContainer<? extends Plugin>> plugins = pluginManager.getPlugins();
+		Collection<PluginContainer<?>> plugins = pluginManager.getPlugins();
 		if (plugins.isEmpty()) {
 			logger.info("Initialization: No plugins found");
 		} else {
 			String split = "\n - ";
 			logger.info("Initialization: {} plugins found:" + split + "{}",
 					plugins.size(),
-					plugins.stream().map(PluginContainer::getInformation)
-							.map(info -> info.getName() + " - " + info.getVersion())
+					plugins.stream().map(PluginContainer::info)
+							.map(info -> info.name() + " - " + info.version())
 							.collect(Collectors.joining(split)));
 		}
 	}

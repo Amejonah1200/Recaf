@@ -6,9 +6,14 @@ import org.slf4j.Logger;
 import software.coley.recaf.analytics.logging.Logging;
 import software.coley.recaf.info.JvmClassInfo;
 import software.coley.recaf.info.builder.JvmClassInfoBuilder;
+import software.coley.recaf.info.properties.BasicPropertyContainer;
 import software.coley.recaf.util.IOUtil;
-import software.coley.recaf.util.threading.ThreadLocals;
-import software.coley.recaf.workspace.model.bundle.*;
+import software.coley.recaf.workspace.model.bundle.AndroidClassBundle;
+import software.coley.recaf.workspace.model.bundle.BasicFileBundle;
+import software.coley.recaf.workspace.model.bundle.BasicJvmClassBundle;
+import software.coley.recaf.workspace.model.bundle.FileBundle;
+import software.coley.recaf.workspace.model.bundle.JvmClassBundle;
+import software.coley.recaf.workspace.model.bundle.VersionedJvmClassBundle;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,7 +29,7 @@ import java.util.NavigableMap;
  *
  * @author Matt Coley
  */
-public class RuntimeWorkspaceResource implements WorkspaceResource {
+public class RuntimeWorkspaceResource extends BasicPropertyContainer implements WorkspaceResource {
 	private static final Object STUB = new Object();
 	private static final Logger logger = Logging.get(RuntimeWorkspaceResource.class);
 	private static final Map<String, Object> cache = new HashMap<>();
@@ -42,12 +47,9 @@ public class RuntimeWorkspaceResource implements WorkspaceResource {
 	}
 
 	private RuntimeWorkspaceResource() {
-		RuntimeWorkspaceResource resource = this;
 		classes = new BasicJvmClassBundle() {
 			@Override
 			public JvmClassInfo get(@Nonnull Object name) {
-				if (name == null)
-					return null;
 				String key = name.toString();
 				if (key.indexOf('.') >= 0)
 					key = key.replace('.', '/');
@@ -60,7 +62,7 @@ public class RuntimeWorkspaceResource implements WorkspaceResource {
 				byte[] value = null;
 				try (InputStream in = ClassLoader.getSystemResourceAsStream(key + ".class")) {
 					if (in != null) {
-						value = IOUtil.toByteArray(in, ThreadLocals.getByteBuffer());
+						value = IOUtil.toByteArray(in);
 					}
 				} catch (IOException ex) {
 					logger.error("Failed to fetch runtime bytecode of class: " + key, ex);
@@ -123,7 +125,7 @@ public class RuntimeWorkspaceResource implements WorkspaceResource {
 
 	@Nonnull
 	@Override
-	public NavigableMap<Integer, JvmClassBundle> getVersionedJvmClassBundles() {
+	public NavigableMap<Integer, VersionedJvmClassBundle> getVersionedJvmClassBundles() {
 		return Collections.emptyNavigableMap();
 	}
 

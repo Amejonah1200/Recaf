@@ -17,7 +17,7 @@ import software.coley.recaf.info.member.MethodMember;
 import software.coley.recaf.services.Service;
 import software.coley.recaf.services.phantom.GeneratedPhantomWorkspaceResource;
 import software.coley.recaf.ui.config.MemberDisplayFormatConfig;
-import software.coley.recaf.ui.config.TextFormatConfig;
+import software.coley.recaf.services.text.TextFormatConfig;
 import software.coley.recaf.ui.control.tree.WorkspaceTreeCell;
 import software.coley.recaf.util.BlwUtil;
 import software.coley.recaf.util.Lang;
@@ -498,7 +498,7 @@ public class TextProviderService implements Service {
 					return dexName;
 			} else if (bundle instanceof AgentServerRemoteVmResource.RemoteJvmClassBundle remoteBundle) {
 				return formatConfig.filter(remoteBundle.getLoaderInfo().getName());
-			} else if (bundle instanceof VersionedClassBundle versionedClassBundle) {
+			} else if (bundle instanceof VersionedJvmClassBundle versionedClassBundle) {
 				return Lang.get("tree.classes") + " (Java " + versionedClassBundle.version() + ")";
 			}
 

@@ -2,6 +2,8 @@ package software.coley.recaf.util;
 
 import it.unimi.dsi.fastutil.chars.Char2IntArrayMap;
 import it.unimi.dsi.fastutil.chars.Char2IntMap;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
 import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
 
@@ -9,12 +11,11 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
-import java.nio.charset.CharsetDecoder;
-import java.nio.charset.CoderResult;
-import java.nio.charset.CodingErrorAction;
-import java.nio.charset.StandardCharsets;
+import java.nio.charset.*;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
 
 /**
@@ -24,6 +25,56 @@ import java.util.Random;
  */
 public class StringUtil {
 	public static final String[] EMPTY_STRING_ARRAY = new String[0];
+	private static final int[] EMPTY_INT_ARRAY = new int[0];
+
+	/**
+	 * @param input
+	 * 		Some text to search.
+	 * @param c
+	 * 		Char to get index of in the input string.
+	 *
+	 * @return Array of indices in the input string where the char exists.
+	 */
+	public static int[] indicesOf(@Nonnull String input, char c) {
+		IntList list = new IntArrayList(5);
+		int i = -1;
+		do {
+			i = input.indexOf(c, i);
+			if (i >= 0) {
+				list.add(i);
+				i++;
+			}
+		} while (i >= 0);
+		return list.toArray(EMPTY_INT_ARRAY);
+	}
+
+	/**
+	 * @param input
+	 * 		Some text to split.
+	 * @param includeEmpty
+	 *        {@code true} to include empty strings.
+	 * @param split
+	 * 		Split character.
+	 *
+	 * @return List of strings between the split characters.
+	 */
+	@Nonnull
+	public static List<String> fastSplit(@Nonnull String input, boolean includeEmpty, char split) {
+		StringBuilder sb = new StringBuilder();
+		ArrayList<String> words = new ArrayList<>();
+		words.ensureCapacity(input.length() / 5);
+		char[] strArray = input.toCharArray();
+		for (char c : strArray) {
+			if (c == split) {
+				if ((includeEmpty || !sb.isEmpty())) words.add(sb.toString());
+				sb.setLength(0);
+			} else {
+				sb.append(c);
+			}
+		}
+		if ((includeEmpty || !sb.isEmpty())) words.add(sb.toString());
+		return words;
+	}
 
 	/**
 	 * @param input
@@ -488,6 +539,100 @@ public class StringUtil {
 	}
 
 	/**
+	 * @param a
+	 * 		Some string.
+	 * @param b
+	 * 		Another.
+	 *
+	 * @return The common suffix between the two strings.
+	 */
+	@Nonnull
+	public static String getCommonSuffix(@Nonnull String a, @Nonnull String b) {
+		int alen = a.length();
+		int blen = b.length();
+		int commonLength = Math.min(alen, blen);
+
+		// Base case where one string is empty.
+		if (commonLength == 0)
+			return "";
+
+		// Find fist non-equal char and get the suffix string.
+		for (int i = 1; i < commonLength + 1; i++) {
+			if (a.charAt(alen - i) != b.charAt(blen - i)) {
+				return a.substring(alen - i + 1);
+			}
+		}
+
+		// For the shared common length both strings are equal.
+		// Yield the shorter string.
+		return alen < blen ? a : b;
+	}
+
+	/**
+	 * @param text
+	 * 		Text to compute length of.
+	 *
+	 * @return Length of text, considering tabs.
+	 */
+	public static int getTabAdjustedLength(@Nonnull String text) {
+		return getTabAdjustedLength(text, 4);
+	}
+
+	/**
+	 * @param text
+	 * 		Text to compute length of.
+	 * @param tabWidth
+	 * 		Tab width.
+	 *
+	 * @return Length of text, considering tabs.
+	 */
+	public static int getTabAdjustedLength(@Nonnull String text, int tabWidth) {
+		int tabIndex = text.indexOf('\t');
+		while (tabIndex >= 0) {
+			if (tabIndex == 0) {
+				text = " ".repeat(tabWidth) + text.substring(1);
+			} else {
+				// Assuming tab width is four: Having two spaces then a tab still yields a length of 4 visually
+				// Thus, we must consider such alignment in our length adjustments.
+				String pre = text.substring(0, tabIndex);
+				String post = text.substring(tabIndex + 1);
+				int alignedLengthExtra = tabWidth - (tabIndex % tabWidth);
+				text = pre + " ".repeat(alignedLengthExtra) + post;
+			}
+			tabIndex = text.indexOf('\t');
+		}
+		return text.length();
+	}
+
+	/**
+	 * @param text
+	 * 		Text to scan prefix of.
+	 *
+	 * @return Number of blank spaces until some non-whitespace char is found.
+	 */
+	public static int getWhitespacePrefixLength(@Nonnull String text) {
+		return getWhitespacePrefixLength(text, 4);
+	}
+
+	/**
+	 * @param text
+	 * 		Text to scan prefix of.
+	 * @param tabWidth
+	 * 		Width of spaces to translate tab characters to.
+	 *
+	 * @return Number of blank spaces until some non-whitespace char is found.
+	 */
+	public static int getWhitespacePrefixLength(@Nonnull String text, int tabWidth) {
+		char[] chars = text.toCharArray();
+		int offset = 0;
+		for (char c : chars) {
+			if (c == ' ' || c == '\t') offset++;
+			else break;
+		}
+		return getTabAdjustedLength(text.substring(0, offset), tabWidth);
+	}
+
+	/**
 	 * @param len
 	 * 		Target string length.
 	 * @param pattern
@@ -497,6 +642,7 @@ public class StringUtil {
 	 *
 	 * @return String with pattern filling up to the desired length on the left.
 	 */
+	@Nonnull
 	public static String fillLeft(int len, @Nonnull String pattern, @Nullable String string) {
 		StringBuilder sb = new StringBuilder(string == null ? "" : string);
 		while (sb.length() < len)
@@ -676,14 +822,121 @@ public class StringUtil {
 
 	/**
 	 * @param data
-	 * 		Some data to check.
+	 * 		Some data to decode.
 	 *
-	 * @return {@code true} when it contains only text.
+	 * @return String decoding result. Check {@link StringDecodingResult#couldDecode()} to determine if successful.
 	 */
-	public static boolean isText(@Nonnull byte[] data) {
+	@Nonnull
+	public static StringDecodingResult decodeString(@Nonnull byte[] data) {
+		// It would be wrong to say we know this data is supposed to be text if its empty.
+		// It's up to the caller to use context clues like file extensions to figure this case out.
 		if (data.length == 0)
-			return false;
-		CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+			return failedDecoding(data);
+
+		// Check for byte-order-mark
+		StringDecodingResult result = null;
+		if (data.length >= 4) {
+			if (ByteHeaderUtil.match(data, ByteHeaderUtil.TEXT_BOM_UTF_32BE)) {
+				result = decodeString(data, StandardCharsets.UTF_32BE);
+			} else if (ByteHeaderUtil.match(data, ByteHeaderUtil.TEXT_BOM_UTF_32LE)) {
+				result = decodeString(data, StandardCharsets.UTF_32LE);
+			} else if (ByteHeaderUtil.match(data, ByteHeaderUtil.TEXT_BOM_UTF_16BE)) {
+				result = decodeString(data, StandardCharsets.UTF_16BE);
+			} else if (ByteHeaderUtil.match(data, ByteHeaderUtil.TEXT_BOM_UTF_16LE)) {
+				result = decodeString(data, StandardCharsets.UTF_16BE);
+			} else if (ByteHeaderUtil.match(data, ByteHeaderUtil.TEXT_BOM_UTF_8)) {
+				result = decodeString(data, StandardCharsets.UTF_8);
+			}
+
+			// If that BOM specifies a charset that works then we're good to go.
+			if (result != null && result.couldDecode())
+				return result;
+		}
+
+		// From 'https://stackoverflow.com/questions/3584069/is-it-possible-to-detect-text-file-encoding-of-two-possible'
+		//
+		// It's not possible with 100% accuracy because, for example, the bytes C3 B1 are an equally valid
+		// representation of "Ăą" in ISO-8859-2 as they are of "ñ" in UTF-8. In fact, because ISO-8859-2 assigns
+		// a character to all 256 possible bytes, every UTF-8 string is also a valid ISO-8859-2 string
+		// (representing different characters if non-ASCII).
+		//
+		// However, the converse is not true. UTF-8 has strict rules about what sequences are valid.
+		// More than 99% of possible 8-octet sequences are not valid UTF-8. And your CSV files are probably much
+		// longer than that. Because of this, you can get good accuracy if you:
+		//
+		//  1. Perform a UTF-8 validity check. If it passes, assume the data is UTF-8.
+		//  2. Otherwise, assume it's ISO-8859 (Latin).
+		result = decodeUtf8(data);
+		if (result.couldDecode())
+			return result;
+		return decodeLatin(data);
+	}
+
+	/**
+	 * @param data
+	 * 		Some data to decode.
+	 *
+	 * @return String decoding result. Check {@link StringDecodingResult#couldDecode()} to determine if successful.
+	 */
+	@Nonnull
+	public static StringDecodingResult decodeUtf8(@Nonnull byte[] data) {
+		return decodeString(data, StandardCharsets.UTF_8);
+	}
+
+	/**
+	 * @param data
+	 * 		Some data to decode.
+	 *
+	 * @return String decoding result. Check {@link StringDecodingResult#couldDecode()} to determine if successful.
+	 */
+	@Nonnull
+	@SuppressWarnings("DataFlowIssue")
+	public static StringDecodingResult decodeLatin(@Nonnull byte[] data) {
+		StringDecodingResult result = decodeString(data, StandardCharsets.ISO_8859_1);
+
+		// ISO_8859_1 should be a mapping of one byte to one char, and if it is not we throw it out as being invalid.
+		//  - Chars < 32 will be discarded since they are special control chars and not indented for display, triggering this.
+		String text = result.text();
+		if (result.couldDecode() && data.length != text.length())
+			return failedDecoding(data);
+
+		return result;
+	}
+
+	/**
+	 * @param data
+	 * 		Some data to decode.
+	 * @param encoding
+	 * 		Encoding to decode with.
+	 *
+	 * @return String decoding result. Check {@link StringDecodingResult#couldDecode()} to determine if successful.
+	 */
+	@Nonnull
+	public static StringDecodingResult decodeString(@Nonnull byte[] data, @Nonnull Charset encoding) {
+		int bytesToChars = 1;
+		if (encoding == StandardCharsets.UTF_8)
+			bytesToChars = 2;
+		else if (encoding == StandardCharsets.UTF_16 || encoding == StandardCharsets.UTF_16BE || encoding == StandardCharsets.UTF_16LE)
+			bytesToChars = 2;
+		else if (encoding == StandardCharsets.UTF_32 || encoding == StandardCharsets.UTF_32BE || encoding == StandardCharsets.UTF_32LE)
+			bytesToChars = 4;
+		return decodingResult(data, encoding, bytesToChars);
+	}
+
+	/**
+	 * @param data
+	 * 		Some data to decode.
+	 * @param encoding
+	 * 		Encoding to decode with.
+	 * @param bytesToChars
+	 * 		Expected number of bytes to make up a single {@code char} in the decoded output.
+	 * 		Strictly used to reduce calls to {@link StringBuilder#ensureCapacity(int)}.
+	 *
+	 * @return String decoding result. Check {@link StringDecodingResult#couldDecode()} to determine if successful.
+	 */
+	@Nonnull
+	private static StringDecodingResult decodingResult(@Nonnull byte[] data, @Nonnull Charset encoding, int bytesToChars) {
+		CharsetDecoder decoder = encoding.newDecoder()
 				.onMalformedInput(CodingErrorAction.REPORT)
 				.onUnmappableCharacter(CodingErrorAction.REPORT);
 		ByteBuffer buffer = ByteBuffer.wrap(data);
@@ -693,6 +946,7 @@ public class StringUtil {
 		int bufferSize = Math.min(length, 4096);
 		char[] charArray = new char[bufferSize];
 		CharBuffer charBuf = CharBuffer.wrap(charArray);
+		StringBuilder output = new StringBuilder(data.length / bytesToChars);
 		while (true) {
 			try {
 				// Exit when no remaining chars to decode
@@ -702,7 +956,7 @@ public class StringUtil {
 				// Decode next chunk into buffer
 				CoderResult result = decoder.decode(buffer, charBuf, true);
 				if (result.isMalformed() || result.isError() || result.isUnmappable())
-					return false;
+					return failedDecoding(data);
 				if (result.isUnderflow())
 					decoder.flush(charBuf);
 
@@ -719,15 +973,39 @@ public class StringUtil {
 					};
 					if (isTextChar) totalTextChars++;
 				}
+				output.append(charArray, 0, arrayEnd);
 				totalChars += arrayEnd;
-				buffer.position(Math.min(length, buffer.position() + bufferSize));
+
+				// If we overflowed in our result, we still have more to decode with this
+				// current input buffer, so we should clear the output buffer and continue as-is.
+				if (result.isOverflow()) {
+					charBuf.flip();
+					continue;
+				}
+
+				// Ensure buffer position increments to next place, but does not exceed the wrapped array's length.
+				buffer.position(Math.min(length, totalChars));
+
+				// Reset the char-buffer contents.
+				charBuf.flip();
+
+				// If we underflowed in our result we are most likely done.
+				if (result.isUnderflow())
+					break;
 			} catch (Exception ex) {
-				return false;
+				return failedDecoding(data);
 			}
 		}
 
-		// This isn't great but works well enough for now.
+		// This isn't great but works well enough for now.1
 		// Basically, if most of the content is text we'll call it text even if there is some that isn't totally valid.
-		return ((double) totalTextChars / totalChars) > 0.9;
+		if (((double) totalTextChars / totalChars) > 0.9)
+			return new StringDecodingResult(data, encoding, output.toString());
+		return failedDecoding(data);
+	}
+
+	@Nonnull
+	private static StringDecodingResult failedDecoding(@Nonnull byte[] data) {
+		return new StringDecodingResult(data, null, null);
 	}
 }

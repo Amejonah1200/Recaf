@@ -34,6 +34,9 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 
+import static software.coley.recaf.services.search.match.StringPredicateProvider.KEY_ANYTHING;
+import static software.coley.recaf.services.search.match.StringPredicateProvider.KEY_NOTHING;
+
 /**
  * Member reference search pane.
  *
@@ -59,19 +62,21 @@ public class MemberReferenceSearchPane extends AbstractSearchPane {
 
 		this.stringPredicateProvider = stringPredicateProvider;
 
-		List<String> stringPredicates = stringPredicateProvider.getBiStringMatchers().keySet().stream().sorted().toList();
+		List<String> stringPredicates = stringPredicateProvider.getBiStringMatchers().keySet().stream()
+				.filter(s -> !KEY_ANYTHING.equals(s) && !KEY_NOTHING.equals(s))
+				.sorted().toList();
 		TextField textOwner = new TextField();
 		TextField textName = new TextField();
 		TextField textDesc = new TextField();
 		ComboBox<String> modeComboOwner = new BoundBiDiComboBox<>(ownerPredicateId, stringPredicates,
 				ToStringConverter.from(s -> Lang.get(StringPredicate.TRANSLATION_PREFIX + s)));
-		modeComboOwner.getSelectionModel().select(0);
+		modeComboOwner.getSelectionModel().select(StringPredicateProvider.KEY_CONTAINS);
 		ComboBox<String> modeComboName = new BoundBiDiComboBox<>(namePredicateId, stringPredicates,
 				ToStringConverter.from(s -> Lang.get(StringPredicate.TRANSLATION_PREFIX + s)));
-		modeComboName.getSelectionModel().select(0);
+		modeComboName.getSelectionModel().select(StringPredicateProvider.KEY_CONTAINS);
 		ComboBox<String> modeComboDesc = new BoundBiDiComboBox<>(descPredicateId, stringPredicates,
 				ToStringConverter.from(s -> Lang.get(StringPredicate.TRANSLATION_PREFIX + s)));
-		modeComboDesc.getSelectionModel().select(0);
+		modeComboDesc.getSelectionModel().select(StringPredicateProvider.KEY_CONTAINS);
 
 		GridPane input = new GridPane();
 		ColumnConstraints colTexts = new ColumnConstraints();

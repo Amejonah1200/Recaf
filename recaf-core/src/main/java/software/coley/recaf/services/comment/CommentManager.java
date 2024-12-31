@@ -11,6 +11,7 @@ import org.davidmoten.text.utils.WordWrap;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.slf4j.Logger;
+import software.coley.collections.Unchecked;
 import software.coley.recaf.analytics.logging.Logging;
 import software.coley.recaf.cdi.EagerInitialization;
 import software.coley.recaf.info.ClassInfo;
@@ -22,8 +23,8 @@ import software.coley.recaf.path.ClassMemberPathNode;
 import software.coley.recaf.path.ClassPathNode;
 import software.coley.recaf.services.Service;
 import software.coley.recaf.services.decompile.DecompilerManager;
-import software.coley.recaf.services.decompile.JvmBytecodeFilter;
-import software.coley.recaf.services.decompile.OutputTextFilter;
+import software.coley.recaf.services.decompile.filter.JvmBytecodeFilter;
+import software.coley.recaf.services.decompile.filter.OutputTextFilter;
 import software.coley.recaf.services.file.RecafDirectoriesConfig;
 import software.coley.recaf.services.json.GsonProvider;
 import software.coley.recaf.services.mapping.*;
@@ -35,10 +36,10 @@ import software.coley.recaf.workspace.model.Workspace;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Manager for comment tracking on {@link ClassInfo} and {@link ClassMember} content in workspaces.
@@ -54,8 +55,8 @@ public class CommentManager implements Service, CommentUpdateListener, CommentCo
 	private final Map<String, DelegatingWorkspaceComments> delegatingMap = new ConcurrentHashMap<>();
 	/** Map of workspace comment impls modeling only data. Used for persistence. */
 	private final Map<String, PersistWorkspaceComments> persistMap = new ConcurrentHashMap<>();
-	private final Set<CommentUpdateListener> commentUpdateListeners = new HashSet<>();
-	private final Set<CommentContainerListener> commentContainerListeners = new HashSet<>();
+	private final List<CommentUpdateListener> commentUpdateListeners = new CopyOnWriteArrayList<>();
+	private final List<CommentContainerListener> commentContainerListeners = new CopyOnWriteArrayList<>();
 	private final WorkspaceManager workspaceManager;
 	private final RecafDirectoriesConfig directoriesConfig;
 	private final CommentManagerConfig config;
@@ -63,8 +64,8 @@ public class CommentManager implements Service, CommentUpdateListener, CommentCo
 
 	@Inject
 	public CommentManager(@Nonnull DecompilerManager decompilerManager, @Nonnull WorkspaceManager workspaceManager,
-						  @Nonnull MappingListeners mappingListeners, @Nonnull GsonProvider gsonProvider,
-						  @Nonnull RecafDirectoriesConfig directoriesConfig, @Nonnull CommentManagerConfig config) {
+	                      @Nonnull MappingListeners mappingListeners, @Nonnull GsonProvider gsonProvider,
+	                      @Nonnull RecafDirectoriesConfig directoriesConfig, @Nonnull CommentManagerConfig config) {
 		this.workspaceManager = workspaceManager;
 		this.gsonProvider = gsonProvider;
 		this.directoriesConfig = directoriesConfig;
@@ -304,8 +305,8 @@ public class CommentManager implements Service, CommentUpdateListener, CommentCo
 				var deserialized = gson.fromJson(json, new TypeToken<Map<String, PersistWorkspaceComments>>() {});
 				persistMap.putAll(deserialized);
 			}
-		} catch (IOException ex) {
-			logger.error("Failed to save comments", ex);
+		} catch (Throwable t) {
+			logger.error("Failed to load comments", t);
 		}
 	}
 
@@ -326,59 +327,39 @@ public class CommentManager implements Service, CommentUpdateListener, CommentCo
 				Files.createDirectories(commentsDirectory);
 			Path store = commentsDirectory.resolve("comments.json");
 			Files.writeString(store, serialized);
-		} catch (IOException ex) {
-			logger.error("Failed to save comments", ex);
+		} catch (Throwable t) {
+			logger.error("Failed to save comments", t);
 		}
 	}
 
 	@Override
 	public void onClassCommentUpdated(@Nonnull ClassPathNode path, @Nullable String comment) {
-		for (CommentUpdateListener listener : commentUpdateListeners)
-			try {
-				listener.onClassCommentUpdated(path, comment);
-			} catch (Throwable t) {
-				logger.error("Uncaught exception in handling of comment update for '{}'", path.getValue().getName(), t);
-			}
+		Unchecked.checkedForEach(commentUpdateListeners, listener -> listener.onClassCommentUpdated(path, comment),
+				(listener, t) -> logger.error("Exception thrown when updating class comment", t));
 	}
 
 	@Override
 	public void onFieldCommentUpdated(@Nonnull ClassMemberPathNode path, @Nullable String comment) {
-		for (CommentUpdateListener listener : commentUpdateListeners)
-			try {
-				listener.onFieldCommentUpdated(path, comment);
-			} catch (Throwable t) {
-				logger.error("Uncaught exception in handling of comment update for '{}'", path.getValue().getName(), t);
-			}
+		Unchecked.checkedForEach(commentUpdateListeners, listener -> listener.onFieldCommentUpdated(path, comment),
+				(listener, t) -> logger.error("Exception thrown when updating field comment", t));
 	}
 
 	@Override
 	public void onMethodCommentUpdated(@Nonnull ClassMemberPathNode path, @Nullable String comment) {
-		for (CommentUpdateListener listener : commentUpdateListeners)
-			try {
-				listener.onMethodCommentUpdated(path, comment);
-			} catch (Throwable t) {
-				logger.error("Uncaught exception in handling of comment update for '{}'", path.getValue().getName(), t);
-			}
+		Unchecked.checkedForEach(commentUpdateListeners, listener -> listener.onMethodCommentUpdated(path, comment),
+				(listener, t) -> logger.error("Exception thrown when updating method comment", t));
 	}
 
 	@Override
 	public void onClassContainerCreated(@Nonnull ClassPathNode path, @Nullable ClassComments comments) {
-		for (CommentContainerListener listener : commentContainerListeners)
-			try {
-				listener.onClassContainerCreated(path, comments);
-			} catch (Throwable t) {
-				logger.error("Uncaught exception in handling of comment container creation for '{}'", path.getValue().getName(), t);
-			}
+		Unchecked.checkedForEach(commentContainerListeners, listener -> listener.onClassContainerCreated(path, comments),
+				(listener, t) -> logger.error("Exception thrown when creating class comment container", t));
 	}
 
 	@Override
 	public void onClassContainerRemoved(@Nonnull ClassPathNode path, @Nullable ClassComments comments) {
-		for (CommentContainerListener listener : commentContainerListeners)
-			try {
-				listener.onClassContainerRemoved(path, comments);
-			} catch (Throwable t) {
-				logger.error("Uncaught exception in handling of comment container removal for '{}'", path.getValue().getName(), t);
-			}
+		Unchecked.checkedForEach(commentContainerListeners, listener -> listener.onClassContainerRemoved(path, comments),
+				(listener, t) -> logger.error("Exception thrown when removing class comment container", t));
 	}
 
 	/**
@@ -487,7 +468,7 @@ public class CommentManager implements Service, CommentUpdateListener, CommentCo
 
 	@Nonnull
 	private DelegatingWorkspaceComments newDelegatingWorkspaceComments(@Nonnull Workspace workspace,
-																	   @Nonnull PersistWorkspaceComments persistComments) {
+	                                                                   @Nonnull PersistWorkspaceComments persistComments) {
 		DelegatingWorkspaceComments delegatingComments = new DelegatingWorkspaceComments(this, persistComments);
 
 		// Initialize delegate class comment models for entries in the persist model.

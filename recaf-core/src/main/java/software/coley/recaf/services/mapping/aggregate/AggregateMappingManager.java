@@ -2,6 +2,9 @@ package software.coley.recaf.services.mapping.aggregate;
 
 import jakarta.annotation.Nonnull;
 import jakarta.inject.Inject;
+import org.slf4j.Logger;
+import software.coley.collections.Unchecked;
+import software.coley.recaf.analytics.logging.Logging;
 import software.coley.recaf.cdi.AutoRegisterWorkspaceListeners;
 import software.coley.recaf.cdi.WorkspaceScoped;
 import software.coley.recaf.services.Service;
@@ -9,8 +12,8 @@ import software.coley.recaf.services.mapping.Mappings;
 import software.coley.recaf.services.workspace.WorkspaceCloseListener;
 import software.coley.recaf.workspace.model.Workspace;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Manages tracking the state of mappings over time.
@@ -22,13 +25,14 @@ import java.util.List;
 @AutoRegisterWorkspaceListeners
 public class AggregateMappingManager implements Service, WorkspaceCloseListener {
 	public static final String SERVICE_ID = "mapping-aggregator";
-	private final List<AggregatedMappingsListener> aggregateListeners = new ArrayList<>();
+	private static final Logger logger = Logging.get(AggregateMappingManager.class);
+	private final List<AggregatedMappingsListener> aggregateListeners = new CopyOnWriteArrayList<>();
 	private final AggregatedMappings aggregatedMappings;
 	private final AggregateMappingManagerConfig config;
 
 	@Inject
 	public AggregateMappingManager(@Nonnull AggregateMappingManagerConfig config,
-								   @Nonnull Workspace workspace) {
+	                               @Nonnull Workspace workspace) {
 		this.config = config;
 		aggregatedMappings = new AggregatedMappings(workspace);
 	}
@@ -45,9 +49,10 @@ public class AggregateMappingManager implements Service, WorkspaceCloseListener 
 	 * @param newMappings
 	 * 		The additional mappings that were added.
 	 */
-	public void updateAggregateMappings(Mappings newMappings) {
+	public void updateAggregateMappings(@Nonnull Mappings newMappings) {
 		aggregatedMappings.update(newMappings);
-		aggregateListeners.forEach(listener -> listener.onAggregatedMappingsUpdated(getAggregatedMappings()));
+		Unchecked.checkedForEach(aggregateListeners, listener -> listener.onAggregatedMappingsUpdated(getAggregatedMappings()),
+				(listener, t) -> logger.error("Exception thrown when updating aggregate mappings", t));
 	}
 
 	/**
@@ -55,7 +60,8 @@ public class AggregateMappingManager implements Service, WorkspaceCloseListener 
 	 */
 	private void clearAggregated() {
 		aggregatedMappings.clear();
-		aggregateListeners.forEach(listener -> listener.onAggregatedMappingsUpdated(getAggregatedMappings()));
+		Unchecked.checkedForEach(aggregateListeners, listener -> listener.onAggregatedMappingsUpdated(getAggregatedMappings()),
+				(listener, t) -> logger.error("Exception thrown when updating aggregate mappings", t));
 	}
 
 	/**

@@ -1,14 +1,13 @@
 package software.coley.recaf.services.workspace.io;
 
 import jakarta.annotation.Nonnull;
+import software.coley.collections.Unchecked;
 import software.coley.recaf.info.*;
 import software.coley.recaf.info.properties.builtin.*;
-import software.coley.recaf.util.Unchecked;
 import software.coley.recaf.util.ZipCreationUtils;
-import software.coley.recaf.services.workspace.WorkspaceManager;
 import software.coley.recaf.workspace.model.Workspace;
 import software.coley.recaf.workspace.model.bundle.AndroidClassBundle;
-import software.coley.recaf.workspace.model.bundle.JvmClassBundle;
+import software.coley.recaf.workspace.model.bundle.VersionedJvmClassBundle;
 import software.coley.recaf.workspace.model.resource.WorkspaceFileResource;
 import software.coley.recaf.workspace.model.resource.WorkspaceResource;
 
@@ -16,10 +15,9 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.zip.DeflaterOutputStream;
 
@@ -27,26 +25,25 @@ import static software.coley.lljzip.format.compression.ZipCompressions.DEFLATED;
 import static software.coley.lljzip.format.compression.ZipCompressions.STORED;
 
 /**
- * Options for configuring / preparing a {@link WorkspaceExporter} when calling
- * {@link WorkspaceManager#createExporter(WorkspaceExportOptions)}.
+ * Options for configuring / preparing a {@link WorkspaceExporter}.
  *
  * @author Matt Coley
  */
 public class WorkspaceExportOptions {
-	private final CompressType compressType;
-	private final OutputType outputType;
-	private final Path path;
+	private final WorkspaceCompressType compressType;
+	private final WorkspaceOutputType outputType;
+	private final WorkspaceExportConsumer consumer;
 	private boolean bundleSupporting;
 	private boolean createZipDirEntries;
 
 	/**
 	 * @param outputType
 	 * 		Type of output for contents.
-	 * @param path
-	 * 		Path to write to.
+	 * @param consumer
+	 * 		Consumer to write to.
 	 */
-	public WorkspaceExportOptions(OutputType outputType, Path path) {
-		this(CompressType.MATCH_ORIGINAL, outputType, path);
+	public WorkspaceExportOptions(@Nonnull WorkspaceOutputType outputType, @Nonnull WorkspaceExportConsumer consumer) {
+		this(WorkspaceCompressType.MATCH_ORIGINAL, outputType, consumer);
 	}
 
 	/**
@@ -54,13 +51,14 @@ public class WorkspaceExportOptions {
 	 * 		Compression option for contents exported.
 	 * @param outputType
 	 * 		Type of output for contents.
-	 * @param path
-	 * 		Path to write to.
+	 * @param consumer
+	 * 		Consumer to write to.
 	 */
-	public WorkspaceExportOptions(CompressType compressType, OutputType outputType, Path path) {
+	public WorkspaceExportOptions(@Nonnull WorkspaceCompressType compressType, @Nonnull WorkspaceOutputType outputType,
+	                              @Nonnull WorkspaceExportConsumer consumer) {
 		this.compressType = compressType;
 		this.outputType = outputType;
-		this.path = path;
+		this.consumer = consumer;
 	}
 
 	/**
@@ -83,47 +81,9 @@ public class WorkspaceExportOptions {
 	/**
 	 * @return New exporter from current options.
 	 */
+	@Nonnull
 	public WorkspaceExporter create() {
 		return new WorkspaceExporterImpl();
-	}
-
-	/**
-	 * Compression option for ZIP/JAR outputs.
-	 */
-	public enum CompressType {
-		/**
-		 * Match the original compression of a {@link Info} item by checking {@link ZipCompressionProperty}.
-		 * When unknown, defaults to enabling compression.
-		 */
-		MATCH_ORIGINAL,
-		/**
-		 * Compress items only when if it will yield more compact data.
-		 * Some smaller files do not compress well due to the overhead cost of the compression.
-		 */
-		SMART,
-		/**
-		 * Compress all items in the output.
-		 */
-		ALWAYS,
-		/**
-		 * Do not compress any items in the output.
-		 */
-		NEVER,
-	}
-
-	/**
-	 * Output option between single files and directories.
-	 */
-	public enum OutputType {
-		/**
-		 * Output to a single file. The type of which is determined by the primary resource's
-		 * {@link WorkspaceFileResource#getFileInfo()} if available. Otherwise, defaults to ZIP/JAR.
-		 */
-		FILE,
-		/**
-		 * Output to a directory.
-		 */
-		DIRECTORY
 	}
 
 	/**
@@ -136,6 +96,7 @@ public class WorkspaceExportOptions {
 		private final Map<String, Long> modifyTimes = new HashMap<>();
 		private final Map<String, Long> createTimes = new HashMap<>();
 		private final Map<String, Long> accessTimes = new HashMap<>();
+		private byte[] prefix;
 
 		@Override
 		public void export(@Nonnull Workspace workspace) throws IOException {
@@ -163,20 +124,22 @@ public class WorkspaceExportOptions {
 					});
 
 					// Write buffer to path
-					Files.write(path, zipBuilder.bytes());
+					if (prefix != null) {
+						consumer.write(prefix);
+						consumer.write(zipBuilder.bytes());
+					} else {
+						consumer.write(zipBuilder.bytes());
+					}
+					consumer.commit();
 					break;
 				case DIRECTORY:
 					for (Map.Entry<String, byte[]> entry : contents.entrySet()) {
 						// Write everything relative to the path
 						String relativePath = entry.getKey();
 						byte[] content = entry.getValue();
-						Path destination = path.resolve(relativePath);
-						Path parent = destination.getParent();
-						if (Files.isDirectory(path)) {
-							Files.createDirectories(parent);
-						}
-						Files.write(destination, content);
+						consumer.writeRelative(relativePath, content);
 					}
+					consumer.commit();
 					break;
 			}
 		}
@@ -186,12 +149,19 @@ public class WorkspaceExportOptions {
 		 * 		Workspace to pull data from.
 		 */
 		private void populate(@Nonnull Workspace workspace) {
+			// If shading libs, they go first so the primary content will be the authoritative copy for
+			// any duplicate paths held by both resources.
 			if (bundleSupporting) {
 				for (WorkspaceResource supportingResource : workspace.getSupportingResources()) {
 					mapInto(contents, supportingResource);
 				}
 			}
-			mapInto(contents, workspace.getPrimaryResource());
+			WorkspaceResource primary = workspace.getPrimaryResource();
+			mapInto(contents, primary);
+
+			// If the resource had prefix data, get it here so that we can write it back later.
+			if (primary instanceof WorkspaceFileResource resource)
+				prefix = ZipPrefixDataProperty.get(resource.getFileInfo());
 		}
 
 		/**
@@ -206,14 +176,24 @@ public class WorkspaceExportOptions {
 			// Place classes into map
 			resource.jvmClassBundleStream().forEach(bundle -> {
 				for (JvmClassInfo classInfo : bundle) {
-					String key = classInfo.getName() + ".class";
+					String key;
+					String originalName = PathOriginalNameProperty.get(classInfo);
+					if (originalName == null) {
+						String pathPrefix = PathPrefixProperty.get(classInfo);
+						String pathSuffix = Objects.requireNonNullElse(PathSuffixProperty.get(classInfo), ".class");
+						key = classInfo.getName() + pathSuffix;
+						if (pathPrefix != null)
+							key = pathPrefix + key;
+					} else {
+						key = originalName;
+					}
 					map.put(key, classInfo.getBytecode());
 					updateProperties(key, classInfo);
 				}
 			});
 
 			// Place versioned files into map
-			for (Map.Entry<Integer, JvmClassBundle> entry : resource.getVersionedJvmClassBundles().entrySet()) {
+			for (Map.Entry<Integer, VersionedJvmClassBundle> entry : resource.getVersionedJvmClassBundles().entrySet()) {
 				String versionPath = JarFileInfo.MULTI_RELEASE_PREFIX + entry.getKey() + "/";
 				for (Map.Entry<String, JvmClassInfo> classEntry : entry.getValue().entrySet()) {
 					String key = versionPath + classEntry.getKey() + ".class";

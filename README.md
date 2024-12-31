@@ -1,4 +1,4 @@
-# Recaf [![Discord](https://img.shields.io/discord/443258489146572810.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2)](https://discord.gg/Bya5HaA) [![codecov](https://codecov.io/gh/Col-E/Recaf/graph/badge.svg?token=N8GslpI1lL)](https://codecov.io/gh/Col-E/Recaf)  ![downloads](https://img.shields.io/github/downloads/Col-E/Recaf/total.svg) [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](CONTRIBUTING.md)
+# Recaf [![Discord](https://dcbadge.limes.pink/api/server/https://discord.gg/Bya5HaA?style=flat)](https://discord.gg/Bya5HaA) [![codecov](https://codecov.io/gh/Col-E/Recaf/graph/badge.svg?token=N8GslpI1lL)](https://codecov.io/gh/Col-E/Recaf)  ![downloads](https://img.shields.io/github/downloads/Col-E/Recaf/total.svg) [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](CONTRIBUTING.md)
 
 ![Recaf 4x UI](recaf.png)
 
@@ -6,18 +6,10 @@ An easy to use modern Java bytecode editor that abstracts away the complexities 
 
 ## Download
 
-- [Managed launcher](https://github.com/Col-E/Recaf-Launcher)
-  - Use the following launcher commands, one after another, to keep Recaf up-to-date and run it: 
-    - `update-ci -b dev4`
-    - `update-jfx`
-    - `compatibility`
-    - `run`
-  - Or run the launcher with the following argument to do that all for you in one go:
-    - `auto`
-  - To update Recaf use `update-ci -b dev4`. The `-b <VALUE>` can be used to specify other 4X based branches.
-  - To run Recaf use the `run` command.
-  - To use the `run` command you must use the `update-jfx` command at least once.
-  - To validate your local environment can run Recaf the `compatibility` command tells you what conflicts exist, if any.
+- [Launcher](https://github.com/Col-E/Recaf-Launcher)
+  - Usage & instructions found on the launcher repo
+- [Snapshot releases](https://github.com/Col-E/Recaf-Launcher/blob/master/MANUAL.md)
+  - See [CI actions](https://github.com/Col-E/Recaf/actions/workflows/build.yml) for release artifacts
 - [Independent releases](https://github.com/Col-E/Recaf/releases) _(None for 4X currently)_
 
 ## Features
@@ -45,13 +37,13 @@ An easy to use modern Java bytecode editor that abstracts away the complexities 
 - Attach to running Java process with instrumentation capabilities
 - And much more
 
-A complete list of features can be found in the [user documentation](https://recaf.gitbook.io/user-documentation/).
+A complete list of features can be found in the [user documentation](https://recaf.coley.software/user/index.html).
 
 ## Scripting & Plugins
 
 Recaf exposes almost all of its functionality through modular API's. Automating behaviors can be done easily with scripts, or with plugins for more complex situations. Additional features can also be added via plugins, which can register hooks in API's that offer them.
 
-To create your own script or plugin, see the developer documentation on [scripting and plugin development](https://recaf.gitbook.io/developer-documentation/plugins-and-scripts/plugin-vs-script).
+To create your own script or plugin, see the [developer documentation](https://recaf.coley.software/dev/index.html), specifically the _"plugins & scripts"_ section.
 
 ## Command Line
 
@@ -59,7 +51,7 @@ Recaf can run as a command line application, which can be especially useful when
 
 ## Development Setup
 
-Clone the repository via `git clone https://github.com/Col-E/Recaf.git -b dev4`
+Clone the repository via `git clone https://github.com/Col-E/Recaf.git`
 
 Open the project in an IDE or generate the build with gradle.
 
@@ -69,4 +61,4 @@ Open the project in an IDE or generate the build with gradle.
 
 **Without IDE**:
 1. Run `gradlew build`
-    - Output will be located at: `recaf-ui/build/recaf-ui-{VERSION}-all.jar`
+    - Output will be located at: `recaf-ui/build/libs/recaf-ui-{VERSION}-all.jar`

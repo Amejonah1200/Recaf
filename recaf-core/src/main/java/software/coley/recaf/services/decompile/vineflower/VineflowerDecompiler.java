@@ -32,7 +32,7 @@ public class VineflowerDecompiler extends AbstractJvmDecompiler {
 	@Inject
 	public VineflowerDecompiler(@Nonnull VineflowerConfig config) {
 		// Change this version to be dynamic when / if the Vineflower authors make a function that returns the version...
-		super(NAME, "1.9.3", config);
+		super(NAME, "1.10.1", config);
 		this.config = config;
 		logger = new VineflowerLogger(config);
 	}
@@ -45,7 +45,7 @@ public class VineflowerDecompiler extends AbstractJvmDecompiler {
 		try {
 			ClassSource source = new ClassSource(workspace, info);
 			fernflower.addSource(source);
-			fernflower.addLibrary(new LibrarySource(workspace));
+			fernflower.addLibrary(new LibrarySource(workspace, info));
 			fernflower.decompileContext();
 
 			String decompiled = source.getSink().getDecompiledOutput().get();

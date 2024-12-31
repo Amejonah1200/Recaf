@@ -4,9 +4,11 @@ import com.sun.tools.attach.*;
 import com.sun.tools.attach.spi.AttachProvider;
 import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.slf4j.Logger;
+import software.coley.collections.Unchecked;
 import software.coley.collections.observable.ObservableList;
 import software.coley.instrument.BuildConfig;
 import software.coley.instrument.Client;
@@ -32,9 +34,7 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.jar.JarFile;
 
 /**
@@ -47,6 +47,8 @@ public class BasicAttachManager implements AttachManager {
 	private static final Logger logger = Logging.get(BasicAttachManager.class);
 	private static final long currentPid = ProcessHandle.current().pid();
 	private static final String JMX_AGENT_ADDRESS = "com.sun.management.jmxremote.localConnectorAddress";
+	private static ExtractState extractState = ExtractState.DEFAULT;
+
 	private final DescriptorComparator descriptorComparator = new DescriptorComparator();
 	private final Map<VirtualMachineDescriptor, VirtualMachine> virtualMachineMap = new ConcurrentHashMap<>();
 	private final Map<VirtualMachineDescriptor, Exception> virtualMachineFailureMap = new ConcurrentHashMap<>();
@@ -55,9 +57,9 @@ public class BasicAttachManager implements AttachManager {
 	private final Map<VirtualMachineDescriptor, String> virtualMachineMainClassMap = new ConcurrentHashMap<>();
 	private final Map<VirtualMachineDescriptor, JmxBeanServerConnection> virtualMachineJmxConnMap = new ConcurrentHashMap<>();
 	private final ObservableList<VirtualMachineDescriptor> virtualMachineDescriptors = new ObservableList<>();
-	private final List<PostScanListener> postScanListeners = new ArrayList<>();
+	private final List<PostScanListener> postScanListeners = new CopyOnWriteArrayList<>();
 	private final AttachManagerConfig config;
-	private static ExtractState extractState = ExtractState.DEFAULT;
+	private ScheduledFuture<?> future;
 
 	@Inject
 	public BasicAttachManager(AttachManagerConfig config) {
@@ -77,7 +79,7 @@ public class BasicAttachManager implements AttachManager {
 					logger.debug("Extracting agent jar to Recaf directory: {}", agentPath.getFileName());
 					Files.createDirectories(config.getAgentDirectory());
 					Extractor.extractToPath(agentPath);
-					ThreadUtil.scheduleAtFixedRate(this::passiveScanUpdate, 0, 1, TimeUnit.SECONDS);
+					future = ThreadUtil.scheduleAtFixedRate(this::passiveScanUpdate, 0, 1, TimeUnit.SECONDS);
 					extractState = ExtractState.SUCCESS;
 				} catch (IOException ex) {
 					logger.error("Failed to extract agent jar to Recaf directory", ex);
@@ -86,9 +88,17 @@ public class BasicAttachManager implements AttachManager {
 			} else {
 				// Already extracted before
 				extractState = ExtractState.SUCCESS;
-				ThreadUtil.scheduleAtFixedRate(this::passiveScanUpdate, 0, 1, TimeUnit.SECONDS);
+				future = ThreadUtil.scheduleAtFixedRate(this::passiveScanUpdate, 0, 1, TimeUnit.SECONDS);
 			}
 		}
+	}
+
+	/**
+	 * Cancel passive scan loop when shutting down.
+	 */
+	@PreDestroy
+	private void onShutdown() {
+		future.cancel(true);
 	}
 
 	/**
@@ -109,7 +119,8 @@ public class BasicAttachManager implements AttachManager {
 	 *
 	 * @return Main class of VM, if possible to resolve.
 	 */
-	private String mapToMainClass(VirtualMachineDescriptor descriptor) {
+	@Nonnull
+	private String mapToMainClass(@Nonnull VirtualMachineDescriptor descriptor) {
 		// Get source string to find main class name from
 		String source = descriptor.displayName();
 		if (source == null || source.isBlank() || source.toLowerCase().contains(".jar")) {
@@ -176,7 +187,7 @@ public class BasicAttachManager implements AttachManager {
 	 *
 	 * @return PID of VM process.
 	 */
-	private int mapToPid(VirtualMachineDescriptor descriptor) {
+	private int mapToPid(@Nonnull VirtualMachineDescriptor descriptor) {
 		String id = descriptor.id();
 		if (id.matches("\\d+")) {
 			return Integer.parseInt(descriptor.id());
@@ -196,6 +207,7 @@ public class BasicAttachManager implements AttachManager {
 	/**
 	 * @return Path to agent jar file.
 	 */
+	@Nonnull
 	public Path getAgentJarPath() {
 		String jarName = "agent-" + BuildConfig.VERSION + ".jar";
 		return config.getAgentDirectory().resolve(jarName);
@@ -311,8 +323,8 @@ public class BasicAttachManager implements AttachManager {
 			}
 
 			// Call listeners
-			for (PostScanListener listener : postScanListeners)
-				listener.onScanCompleted(toAdd, toRemove);
+			Unchecked.checkedForEach(postScanListeners, listener -> listener.onScanCompleted(toAdd, toRemove),
+					(listener, t) -> logger.error("Exception thrown after scan completion", t));
 		});
 	}
 

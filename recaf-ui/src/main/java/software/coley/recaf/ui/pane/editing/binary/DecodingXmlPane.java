@@ -15,11 +15,10 @@ import software.coley.recaf.path.PathNode;
 import software.coley.recaf.services.navigation.FileNavigable;
 import software.coley.recaf.services.navigation.Navigable;
 import software.coley.recaf.services.navigation.UpdatableNavigable;
-import software.coley.recaf.services.info.association.FileTypeAssociationService;
+import software.coley.recaf.services.info.association.FileTypeSyntaxAssociationService;
 import software.coley.recaf.ui.control.richtext.Editor;
 import software.coley.recaf.ui.control.richtext.bracket.BracketMatchGraphicFactory;
 import software.coley.recaf.ui.control.richtext.bracket.SelectedBracketTracking;
-import software.coley.recaf.ui.control.richtext.problem.ProblemGraphicFactory;
 import software.coley.recaf.ui.control.richtext.search.SearchBar;
 import software.coley.recaf.util.FxThreadUtil;
 import software.coley.recaf.util.StringUtil;
@@ -42,15 +41,12 @@ public class DecodingXmlPane extends BorderPane implements FileNavigable, Updata
 	protected FilePathNode path;
 
 	@Inject
-	public DecodingXmlPane(@Nonnull SearchBar searchBar, @Nonnull FileTypeAssociationService associationService) {
+	public DecodingXmlPane(@Nonnull SearchBar searchBar, @Nonnull FileTypeSyntaxAssociationService languageAssociation) {
 		// Configure the editor
 		editor = new Editor();
 		editor.setSelectedBracketTracking(new SelectedBracketTracking());
-		editor.getRootLineGraphicFactory().addLineGraphicFactories(
-				new BracketMatchGraphicFactory(),
-				new ProblemGraphicFactory()
-		);
-		associationService.configureEditorSyntax("xml", editor);
+		editor.getRootLineGraphicFactory().addLineGraphicFactory(new BracketMatchGraphicFactory());
+		languageAssociation.configureEditorSyntax("xml", editor);
 		editor.getCodeArea().setEditable(false);
 		searchBar.install(editor);
 
@@ -74,6 +70,7 @@ public class DecodingXmlPane extends BorderPane implements FileNavigable, Updata
 	public void disable() {
 		setDisable(true);
 		setOnKeyPressed(null);
+		editor.close();
 	}
 
 	@Override

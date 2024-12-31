@@ -1,22 +1,25 @@
 package software.coley.recaf.services.workspace.processors;
 
 import jakarta.annotation.Nonnull;
+import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
-import software.coley.recaf.cdi.WorkspaceScoped;
 import software.coley.recaf.info.AndroidClassInfo;
 import software.coley.recaf.info.ClassInfo;
 import software.coley.recaf.info.JvmClassInfo;
 import software.coley.recaf.info.properties.builtin.ThrowableProperty;
 import software.coley.recaf.services.inheritance.InheritanceGraph;
+import software.coley.recaf.services.inheritance.InheritanceGraphService;
 import software.coley.recaf.services.inheritance.InheritanceVertex;
-import software.coley.recaf.workspace.model.WorkspaceModificationListener;
 import software.coley.recaf.services.workspace.WorkspaceProcessor;
 import software.coley.recaf.workspace.model.Workspace;
+import software.coley.recaf.workspace.model.WorkspaceModificationListener;
 import software.coley.recaf.workspace.model.bundle.AndroidClassBundle;
 import software.coley.recaf.workspace.model.bundle.JvmClassBundle;
 import software.coley.recaf.workspace.model.resource.ResourceAndroidClassListener;
 import software.coley.recaf.workspace.model.resource.ResourceJvmClassListener;
 import software.coley.recaf.workspace.model.resource.WorkspaceResource;
+
+import java.util.Objects;
 
 /**
  * Workspace processor that marks {@link ClassInfo} values that inherit from {@link Throwable}
@@ -25,19 +28,19 @@ import software.coley.recaf.workspace.model.resource.WorkspaceResource;
  *
  * @author Matt Coley
  */
-@WorkspaceScoped
+@Dependent
 public class ThrowablePropertyAssigningProcessor implements WorkspaceProcessor, ResourceJvmClassListener, ResourceAndroidClassListener {
 	private static final String THROWABLE = "java/lang/Throwable";
-	private final InheritanceGraph graph;
+	private final InheritanceGraph inheritanceGraph;
 
 	@Inject
-	public ThrowablePropertyAssigningProcessor(InheritanceGraph graph) {
-		this.graph = graph;
+	public ThrowablePropertyAssigningProcessor(@Nonnull InheritanceGraphService graphService) {
+		this.inheritanceGraph = Objects.requireNonNull(graphService.getCurrentWorkspaceInheritanceGraph(), "Graph not created");
 	}
 
 	@Override
-	public void onWorkspaceOpened(@Nonnull Workspace workspace) {
-		graph.getVertex(THROWABLE).allChildren().forEach(vertex -> {
+	public void processWorkspace(@Nonnull Workspace workspace) {
+		inheritanceGraph.getVertex(THROWABLE).allChildren().forEach(vertex -> {
 			ClassInfo classInfo = vertex.getValue();
 			ThrowableProperty.set(classInfo);
 		});
@@ -67,52 +70,52 @@ public class ThrowablePropertyAssigningProcessor implements WorkspaceProcessor, 
 	}
 
 	private void handle(@Nonnull ClassInfo cls) {
-		InheritanceVertex vertex = graph.getVertex(cls.getName());
+		InheritanceVertex vertex = inheritanceGraph.getVertex(cls.getName());
 		if (vertex != null && vertex.hasParent(THROWABLE))
 			ThrowableProperty.set(cls);
 	}
 
 	@Override
 	public void onNewClass(@Nonnull WorkspaceResource resource,
-						   @Nonnull AndroidClassBundle bundle,
-						   @Nonnull AndroidClassInfo cls) {
+	                       @Nonnull AndroidClassBundle bundle,
+	                       @Nonnull AndroidClassInfo cls) {
 		handle(cls);
 	}
 
 	@Override
 	public void onUpdateClass(@Nonnull WorkspaceResource resource,
-							  @Nonnull AndroidClassBundle bundle,
-							  @Nonnull AndroidClassInfo oldCls,
-							  @Nonnull AndroidClassInfo newCls) {
+	                          @Nonnull AndroidClassBundle bundle,
+	                          @Nonnull AndroidClassInfo oldCls,
+	                          @Nonnull AndroidClassInfo newCls) {
 		handle(newCls);
 	}
 
 	@Override
 	public void onRemoveClass(@Nonnull WorkspaceResource resource,
-							  @Nonnull AndroidClassBundle bundle,
-							  @Nonnull AndroidClassInfo cls) {
+	                          @Nonnull AndroidClassBundle bundle,
+	                          @Nonnull AndroidClassInfo cls) {
 		// no-op
 	}
 
 	@Override
 	public void onNewClass(@Nonnull WorkspaceResource resource,
-						   @Nonnull JvmClassBundle bundle,
-						   @Nonnull JvmClassInfo cls) {
+	                       @Nonnull JvmClassBundle bundle,
+	                       @Nonnull JvmClassInfo cls) {
 		handle(cls);
 	}
 
 	@Override
 	public void onUpdateClass(@Nonnull WorkspaceResource resource,
-							  @Nonnull JvmClassBundle bundle,
-							  @Nonnull JvmClassInfo oldCls,
-							  @Nonnull JvmClassInfo newCls) {
+	                          @Nonnull JvmClassBundle bundle,
+	                          @Nonnull JvmClassInfo oldCls,
+	                          @Nonnull JvmClassInfo newCls) {
 		handle(newCls);
 	}
 
 	@Override
 	public void onRemoveClass(@Nonnull WorkspaceResource resource,
-							  @Nonnull JvmClassBundle bundle,
-							  @Nonnull JvmClassInfo cls) {
+	                          @Nonnull JvmClassBundle bundle,
+	                          @Nonnull JvmClassInfo cls) {
 		// no-op
 	}
 }

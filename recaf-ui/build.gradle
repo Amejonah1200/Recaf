@@ -4,7 +4,8 @@ plugins {
     alias(libs.plugins.shadow)
 }
 
-def javaFxIncludeInDist = System.getProperty('skip.jfx.bundle') == null
+def javaFxVersion = '22.0.1'
+def javaFxIncludeInDist = System.getProperty('skip_jfx_bundle') == null
 
 javafx {
     version = libs.versions.javafx.lib.get()
@@ -18,6 +19,7 @@ dependencies {
     implementation(libs.atlantafx)
     implementation(libs.docking)
     implementation(libs.bundles.ikonli)
+    implementation(libs.bundles.image.io)
     implementation(libs.jsvg)
     implementation(libs.reactfx)
     implementation(libs.richtextfx)
@@ -32,6 +34,7 @@ shadowJar {
     exclude "META-INF/maven/**"
     exclude "META-INF/rewrite/**"
     exclude "META-INF/proguard/*"
+    exclude "META-INF/plugins/*"
     exclude "META-INF/native-image/*"
     exclude "META-INF/*.properties"
 

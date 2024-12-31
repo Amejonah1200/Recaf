@@ -38,8 +38,25 @@ public class WorkspaceClassRemapper extends ClassRemapper {
 	}
 
 	@Override
-	protected MethodVisitor createMethodRemapper(MethodVisitor mv) {
-		return new BetterMethodRemapper(mv, workspaceRemapper);
+	public MethodVisitor visitMethod(int access, @Nonnull String name, @Nonnull String descriptor,
+	                                 @Nullable String signature, @Nullable String[] exceptions) {
+		// Adapted from base ClassRemapper implementation.
+		// This allows us to skip calls to super 'visitMethod' to bypass calls to 'createMethodRemapper'
+		// since our visitor we want to make needs information accessible here, but not in that method.
+		String remappedDescriptor = remapper.mapMethodDesc(descriptor);
+		MethodVisitor mv =
+				cv == null ? null : cv.visitMethod(
+						access,
+						remapper.mapMethodName(className, name, descriptor),
+						remappedDescriptor,
+						remapper.mapSignature(signature, false),
+						exceptions == null ? null : remapper.mapTypes(exceptions));
+		return mv == null ? null : new VariableRenamingMethodVisitor(className, name, descriptor, mv, workspaceRemapper);
+	}
+
+	@Override
+	protected MethodVisitor createMethodRemapper(@Nullable MethodVisitor mv) {
+		throw new IllegalStateException("Enhanced 'visitMethod(...)' usage required, 'createMethodMapper(...)' should never be called");
 	}
 
 	/**
@@ -51,10 +68,21 @@ public class WorkspaceClassRemapper extends ClassRemapper {
 
 	/**
 	 * {@link MethodRemapper} pointing to enhanced remapping methods to allow for more context-sensitive behavior.
+	 * Method visitor that functions as an adapter for the
+	 * {@link #visitMethod(int, String, String, String, String[]) standard method remapping visitor}
+	 * that additionally supports variable renaming.
 	 */
-	private class BetterMethodRemapper extends MethodRemapper {
-		protected BetterMethodRemapper(MethodVisitor methodVisitor, Remapper remapper) {
-			super(RecafConstants.getAsmVersion(), methodVisitor, remapper);
+	private class VariableRenamingMethodVisitor extends MethodRemapper {
+		private final String methodOwner;
+		private final String methodName;
+		private final String methodDesc;
+
+		public VariableRenamingMethodVisitor(@Nonnull String methodOwner, @Nonnull String methodName, @Nonnull String methodDesc,
+		                                     @Nullable MethodVisitor mv, @Nonnull Remapper remapper) {
+			super(RecafConstants.getAsmVersion(), mv, remapper);
+			this.methodOwner = methodOwner;
+			this.methodName = methodName;
+			this.methodDesc = methodDesc;
 		}
 
 		@Override
@@ -71,28 +99,10 @@ public class WorkspaceClassRemapper extends ClassRemapper {
 					(Handle) remapper.mapValue(bootstrapMethodHandle),
 					remappedBootstrapMethodArguments);
 		}
-	}
-
-	/**
-	 * Method visitor that functions as an adapter for the
-	 * {@link #visitMethod(int, String, String, String, String[]) standard method remapping visitor}
-	 * that additionally supports variable renaming.
-	 */
-	private class VariableRenamingMethodVisitor extends MethodVisitor {
-		private final String className;
-		private final String methodName;
-		private final String methodDesc;
-
-		public VariableRenamingMethodVisitor(String className, String methodName, String methodDesc, MethodVisitor mv) {
-			super(RecafConstants.getAsmVersion(), mv);
-			this.className = className;
-			this.methodName = methodName;
-			this.methodDesc = methodDesc;
-		}
 
 		@Override
 		public void visitLocalVariable(String name, String desc, String signature, Label start, Label end, int index) {
-			String mappedName = workspaceRemapper.mapVariableName(className, methodName, methodDesc, name, desc, index);
+			String mappedName = workspaceRemapper.mapVariableName(methodOwner, methodName, methodDesc, name, desc, index);
 			super.visitLocalVariable(mappedName, desc, signature, start, end, index);
 		}
 	}

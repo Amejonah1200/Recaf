@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * @author Matt Coley
  * @see RegexLanguages Predefined languages to pass to {@link RegexSyntaxHighlighter#RegexSyntaxHighlighter(RegexRule)}.
  */
-public class RegexSyntaxHighlighter implements SyntaxHighlighter {
+public class RegexSyntaxHighlighter extends AbstractSyntaxHighlighter {
 	private static final Logger logger = Logging.get(RegexSyntaxHighlighter.class);
 	private static final Map<List<RegexRule>, Pattern> patternCache = new ConcurrentHashMap<>();
 	private final RegexRule rootRule;
@@ -35,16 +35,17 @@ public class RegexSyntaxHighlighter implements SyntaxHighlighter {
 
 	@Nonnull
 	@Override
-	public StyleSpans<Collection<String>> createStyleSpans(@Nonnull String text, int start, int end) {
+	protected StyleSpans<Collection<String>> createStyleSpansImpl(@Nonnull String text, int start, int end) {
 		try {
-			StyleSpansBuilder<Collection<String>> builder = new StyleSpansBuilder<>();
 			Region region = new Region(text, null, rootRule, start, end);
 			region.split(rootRule.subRules());
+
+			StyleSpansBuilder<Collection<String>> builder = new StyleSpansBuilder<>();
 			region.visitBuilder(builder);
 			return builder.create();
-		} catch (RuntimeException ex) {
-			logger.error("Error creating style spans for text", ex);
-			throw ex;
+		} catch (Throwable t) {
+			logger.error("Error creating style spans for text", t);
+			throw t;
 		}
 	}
 
@@ -66,7 +67,7 @@ public class RegexSyntaxHighlighter implements SyntaxHighlighter {
 			if (advanceMark != null && backtrackMark != null) {
 				// If the range is a FULL match (from start to finish, no leading or trailing text)
 				// then we do not need to change anything.
-				if (rangeText.matches(rule.regex()))
+				if (RegexUtil.matches(rule.regex(), rangeText))
 					break;
 
 				// Positions of marks within the text.
@@ -185,6 +186,7 @@ public class RegexSyntaxHighlighter implements SyntaxHighlighter {
 			this.start = start;
 			this.end = end;
 		}
+
 		/**
 		 * Splits this node into subregions based on the given rules.
 		 *

@@ -2,8 +2,8 @@ package software.coley.recaf.ui.pane.editing.assembler;
 
 import jakarta.annotation.Nonnull;
 import jakarta.enterprise.context.Dependent;
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import javafx.scene.Node;
 import me.darknet.assembler.ast.ASTElement;
 import me.darknet.assembler.ast.specific.ASTClass;
 import me.darknet.assembler.ast.specific.ASTField;
@@ -17,6 +17,8 @@ import me.darknet.assembler.parser.Token;
 import me.darknet.assembler.util.Location;
 import org.fxmisc.richtext.CodeArea;
 import org.slf4j.Logger;
+import software.coley.collections.Unchecked;
+import software.coley.collections.box.Box;
 import software.coley.recaf.analytics.logging.Logging;
 import software.coley.recaf.info.ClassInfo;
 import software.coley.recaf.info.member.ClassMember;
@@ -26,21 +28,29 @@ import software.coley.recaf.path.DirectoryPathNode;
 import software.coley.recaf.path.PathNode;
 import software.coley.recaf.services.assembler.AssemblerPipeline;
 import software.coley.recaf.services.assembler.AssemblerPipelineManager;
+import software.coley.recaf.services.inheritance.InheritanceGraph;
+import software.coley.recaf.services.inheritance.InheritanceGraphService;
 import software.coley.recaf.services.navigation.ClassNavigable;
 import software.coley.recaf.services.navigation.UpdatableNavigable;
+import software.coley.recaf.services.workspace.WorkspaceManager;
 import software.coley.recaf.ui.LanguageStylesheets;
 import software.coley.recaf.ui.config.KeybindingConfig;
-import software.coley.recaf.ui.control.BoundTab;
 import software.coley.recaf.ui.control.richtext.Editor;
-import software.coley.recaf.ui.control.richtext.bracket.BracketMatchGraphicFactory;
 import software.coley.recaf.ui.control.richtext.bracket.SelectedBracketTracking;
-import software.coley.recaf.ui.control.richtext.problem.*;
+import software.coley.recaf.ui.control.richtext.problem.Problem;
+import software.coley.recaf.ui.control.richtext.problem.ProblemLevel;
+import software.coley.recaf.ui.control.richtext.problem.ProblemPhase;
+import software.coley.recaf.ui.control.richtext.problem.ProblemTracking;
 import software.coley.recaf.ui.control.richtext.search.SearchBar;
+import software.coley.recaf.ui.control.richtext.suggest.AssemblerTabCompleter;
 import software.coley.recaf.ui.control.richtext.syntax.RegexLanguages;
 import software.coley.recaf.ui.control.richtext.syntax.RegexSyntaxHighlighter;
 import software.coley.recaf.ui.pane.editing.AbstractContentPane;
+import software.coley.recaf.ui.pane.editing.SideTabsInjector;
 import software.coley.recaf.ui.pane.editing.tabs.FieldsAndMethodsPane;
-import software.coley.recaf.util.*;
+import software.coley.recaf.util.Animations;
+import software.coley.recaf.util.FxThreadUtil;
+import software.coley.recaf.util.SceneUtils;
 import software.coley.recaf.workspace.model.bundle.Bundle;
 
 import java.time.Duration;
@@ -65,7 +75,7 @@ public class AssemblerPane extends AbstractContentPane<PathNode<?>> implements U
 	private final ProblemTracking problemTracking = new ProblemTracking();
 	private final Editor editor = new Editor();
 	private final AtomicBoolean updateLock = new AtomicBoolean();
-	private final Instance<FieldsAndMethodsPane> fieldsAndMethodsPaneProvider;
+	private final AssemblerTabCompleter tabCompleter;
 	private AssemblerPipeline<? extends ClassInfo, ? extends ClassResult, ? extends ClassRepresentation> pipeline;
 	private ClassResult lastResult;
 	private ClassRepresentation lastAssembledClassRepresentation;
@@ -81,21 +91,22 @@ public class AssemblerPane extends AbstractContentPane<PathNode<?>> implements U
 	                     @Nonnull AssemblerContextActionSupport contextActionSupport,
 	                     @Nonnull SearchBar searchBar,
 	                     @Nonnull KeybindingConfig keys,
-	                     @Nonnull Instance<FieldsAndMethodsPane> fieldsAndMethodsPaneProvider) {
+	                     @Nonnull SideTabsInjector sideTabsInjector,
+	                     @Nonnull WorkspaceManager workspaceManager,
+	                     @Nonnull InheritanceGraphService graphService) {
 		this.pipelineManager = pipelineManager;
 		this.assemblerToolTabs = assemblerToolTabs;
-		this.fieldsAndMethodsPaneProvider = fieldsAndMethodsPaneProvider;
 
 		int timeToWait = pipelineManager.getServiceConfig().getDisassemblyAstParseDelay().getValue();
 
+		InheritanceGraph inheritanceGraph = Objects.requireNonNull(graphService.getCurrentWorkspaceInheritanceGraph(), "Graph not created");
+		tabCompleter = new AssemblerTabCompleter(Objects.requireNonNull(workspaceManager.getCurrent()), inheritanceGraph);
+		editor.setTabCompleter(tabCompleter);
 		editor.getCodeArea().getStylesheets().add(LanguageStylesheets.getJasmStylesheet());
 		editor.setSelectedBracketTracking(new SelectedBracketTracking());
 		editor.setSyntaxHighlighter(new RegexSyntaxHighlighter(RegexLanguages.getJasmLanguage()));
 		editor.setProblemTracking(problemTracking);
-		editor.getRootLineGraphicFactory().addLineGraphicFactories(
-				new BracketMatchGraphicFactory(),
-				new ProblemGraphicFactory()
-		);
+		editor.getRootLineGraphicFactory().addDefaultCodeGraphicFactories();
 		editor.getTextChangeEventStream()
 				.successionEnds(Duration.ofMillis(timeToWait))
 				.addObserver(e -> assemble());
@@ -129,26 +140,19 @@ public class AssemblerPane extends AbstractContentPane<PathNode<?>> implements U
 	 * Sets up {@link FieldsAndMethodsPane} as a side-tab and sets up notifications for {@link AssemblerToolTabs}
 	 * and its children when the selected {@link ClassMember} in the {@link #lastConcreteAst} changes.
 	 *
-	 * @param classPathNode
+	 * @param classPath
 	 * 		The given path.
 	 */
-	private void lateInitForClass(@Nonnull ClassPathNode classPathNode) {
-		// Show declared fields/methods
-		FieldsAndMethodsPane fieldsAndMethodsPane = fieldsAndMethodsPaneProvider.get();
-		fieldsAndMethodsPane.setupSelectionNavigationListener(this);
-		addSideTab(new BoundTab(Lang.getBinding("fieldsandmethods.title"),
-				Icons.getIconView(Icons.FIELD_N_METHOD),
-				fieldsAndMethodsPane
-		));
-		fieldsAndMethodsPane.onUpdatePath(classPathNode);
-
+	private void lateInitForClass(@Nonnull ClassPathNode classPath) {
 		// Since the content displayed is for a whole class, and the tool tabs are scoped to a method, we need to
 		// update them when a method is selected. We do so by tracking the caret position for being within the
 		// range of one of the methods in the last AST model.
+		Box<PathNode<?>> lastPathBox = new Box<>();
+		Box<ClassResult> lastResultBox = new Box<>();
 		editor.getCaretPosEventStream().addObserver(e -> {
 			if (lastConcreteAst == null)
 				return;
-			ClassInfo declaringClass = classPathNode.getValue();
+			ClassInfo declaringClass = classPath.getValue();
 			int caret = editor.getCodeArea().getCaretPosition();
 			for (ASTElement root : lastConcreteAst) {
 				if (root instanceof ASTClass astClass) {
@@ -166,13 +170,25 @@ public class AssemblerPane extends AbstractContentPane<PathNode<?>> implements U
 							continue;
 						}
 
+						PathNode<?> prior = lastPathBox.get();
 						if (classMember != null) {
-							ClassMemberPathNode memberPath = classPathNode.child(classMember);
-							eachChild(UpdatableNavigable.class, c -> c.onUpdatePath(memberPath));
+							ClassMemberPathNode memberPath = classPath.child(classMember);
+							if (!Objects.equals(prior, memberPath)) {
+								lastPathBox.set(memberPath);
+								eachChild(UpdatableNavigable.class, c -> c.onUpdatePath(memberPath));
+							}
 						} else {
-							eachChild(UpdatableNavigable.class, c -> c.onUpdatePath(classPathNode));
+							if (!Objects.equals(prior, classPath)) {
+								lastPathBox.set(classPath);
+								eachChild(UpdatableNavigable.class, c -> c.onUpdatePath(classPath));
+							}
 						}
-						eachChild(AssemblerBuildConsumer.class, c -> c.consumeClass(lastResult, lastAssembledClass));
+
+						ClassResult oldResult = lastResultBox.get();
+						if (oldResult != lastResult) {
+							lastResultBox.set(lastResult);
+							eachChild(AssemblerBuildConsumer.class, c -> c.consumeClass(lastResult, lastAssembledClass));
+						}
 						return;
 					}
 				}
@@ -180,8 +196,15 @@ public class AssemblerPane extends AbstractContentPane<PathNode<?>> implements U
 		});
 
 		// Common init
-		assemblerToolTabs.onUpdatePath(classPathNode);
+		assemblerToolTabs.onUpdatePath(classPath);
 		lateInit();
+	}
+
+	@Override
+	public void requestFocus() {
+		// The editor is not the first thing focused when added to the scene, so when it is added to the scene
+		// we'll want to manually focus it so that you can immediately use keybinds and navigate around.
+		SceneUtils.whenAddedToSceneConsume(editor.getCodeArea(), Node::requestFocus);
 	}
 
 	/**
@@ -209,6 +232,12 @@ public class AssemblerPane extends AbstractContentPane<PathNode<?>> implements U
 					assemble();
 			});
 		}
+	}
+
+	@Override
+	public void disable() {
+		super.disable();
+		editor.close();
 	}
 
 	@Nonnull
@@ -264,7 +293,8 @@ public class AssemblerPane extends AbstractContentPane<PathNode<?>> implements U
 
 		// Update the path and call any path listeners.
 		this.path = path;
-		pathUpdateListeners.forEach(listener -> listener.accept(path));
+		Unchecked.checkedForEach(pathUpdateListeners, listener -> listener.accept(path),
+				(listener, t) -> logger.error("Exception thrown when handling assembler-pane path update callback", t));
 
 		// Update UI state.
 		if (!updateLock.get()) {
@@ -344,12 +374,17 @@ public class AssemblerPane extends AbstractContentPane<PathNode<?>> implements U
 				return pipeline.concreteParse(roughResult.get()).ifOk(concreteAst -> {
 					// The transform was a success.
 					lastConcreteAst = concreteAst;
+					tabCompleter.setAst(concreteAst);
 					eachChild(AssemblerAstConsumer.class, c -> c.consumeAst(concreteAst, AstPhase.CONCRETE));
 				}).ifErr((partialAst, errors) -> {
 					// The transform failed.
 					lastPartialAst = partialAst;
+					tabCompleter.setAst(partialAst);
 					eachChild(AssemblerAstConsumer.class, c -> c.consumeAst(partialAst, AstPhase.CONCRETE_PARTIAL));
+					processErrors(errors, ProblemPhase.LINT);
 				});
+			} else {
+				tabCompleter.clearAst();
 			}
 
 			// Fall-back to rough AST.
@@ -420,17 +455,21 @@ public class AssemblerPane extends AbstractContentPane<PathNode<?>> implements U
 							String memberType;
 							if (oldMember.isMethod()) {
 								memberType = "method";
-								if (assembledClass.getMethods().size() == methodCount) {
-									newMember = assembledClass.getDeclaredMethod(oldMember.getName(), oldMember.getDescriptor());
-								} else {
-									newMember = null;
+								newMember = assembledClass.getDeclaredMethod(oldMember.getName(), oldMember.getDescriptor());
+								if (methodCount != assembledClass.getMethods().size()){
+									ASTElement sourceAst = lastConcreteAst.get(0);
+									Error err = new Error("Assembling in this context detected a change in the number of methods.\n" +
+											"Check and see if your class has illegal duplicate method definitions.", sourceAst.location());
+									processErrors(List.of(err), ProblemPhase.BUILD);
 								}
 							} else {
 								memberType = "field";
-								if (assembledClass.getFields().size() == fieldCount) {
-									newMember = assembledClass.getDeclaredField(oldMember.getName(), oldMember.getDescriptor());
-								} else {
-									newMember = null;
+								newMember = assembledClass.getDeclaredField(oldMember.getName(), oldMember.getDescriptor());
+								if (fieldCount != assembledClass.getFields().size()){
+									ASTElement sourceAst = lastConcreteAst.get(0);
+									Error err = new Error("Assembling in this context detected a change in the number of fields.\n" +
+											"Check and see if your class has illegal duplicate field definitions.", sourceAst.location());
+									processErrors(List.of(err), ProblemPhase.BUILD);
 								}
 							}
 
@@ -456,7 +495,8 @@ public class AssemblerPane extends AbstractContentPane<PathNode<?>> implements U
 					 */
 
 					eachChild(AssemblerBuildConsumer.class, c -> c.consumeClass(result, lastAssembledClass));
-				}).ifErr(errors -> processErrors(errors, ProblemPhase.BUILD));
+				}).ifErr(errors -> processErrors(errors, ProblemPhase.BUILD))
+						.ifWarn(warns -> processErrors(warns, ProblemLevel.WARN, ProblemPhase.BUILD));
 			} catch (Throwable ex) {
 				logger.error("Uncaught exception when assembling contents of {}", path, ex);
 				FxThreadUtil.run(() -> Animations.animateFailure(editor, 1000));
@@ -472,6 +512,8 @@ public class AssemblerPane extends AbstractContentPane<PathNode<?>> implements U
 				updateLock.set(true);
 				try {
 					Bundle<ClassInfo> bundle = path.getValueOfType(Bundle.class);
+					if (bundle == null)
+						throw new IllegalStateException("Bundle not included in assembler pane's path");
 					bundle.put(lastAssembledClass);
 					FxThreadUtil.run(() -> Animations.animateSuccess(editor, 1000));
 				} catch (Throwable t) {
@@ -495,11 +537,26 @@ public class AssemblerPane extends AbstractContentPane<PathNode<?>> implements U
 	 * 		Phase the problems belong to.
 	 */
 	private void processErrors(@Nonnull Collection<Error> errors, @Nonnull ProblemPhase phase) {
+		processErrors(errors, ProblemLevel.ERROR, phase);
+	}
+
+	/**
+	 * Add the given errors to {@link #problemTracking} and refresh the UI.
+	 *
+	 * @param errors
+	 * 		Problems to add.
+	 * @param level
+	 * 		Severity level of problems.
+	 * @param phase
+	 * 		Phase the problems belong to.
+	 */
+	private void processErrors(@Nonnull Collection<? extends Error> errors, @Nonnull ProblemLevel level, @Nonnull ProblemPhase phase) {
 		for (Error error : errors) {
 			Location location = error.getLocation();
 			int line = location == null ? 1 : location.line();
-			int column = location == null ? 1 : location.column();
-			Problem problem = new Problem(line, column, ProblemLevel.ERROR, phase, error.getMessage());
+			int start = location == null ? 1 : location.column();
+			int length = location == null ? 1 : location.length();
+			Problem problem = new Problem(line, start, length, level, phase, error.getMessage());
 			problemTracking.add(problem);
 
 			// REMOVE IS TRACING PARSER ERRORS

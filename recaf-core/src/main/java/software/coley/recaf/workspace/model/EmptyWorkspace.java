@@ -3,6 +3,7 @@ package software.coley.recaf.workspace.model;
 import jakarta.annotation.Nonnull;
 import software.coley.recaf.info.FileInfo;
 import software.coley.recaf.info.JvmClassInfo;
+import software.coley.recaf.info.properties.Property;
 import software.coley.recaf.workspace.model.bundle.*;
 import software.coley.recaf.workspace.model.resource.*;
 
@@ -63,7 +64,7 @@ public class EmptyWorkspace extends BasicWorkspace {
 
 		@Nonnull
 		@Override
-		public NavigableMap<Integer, JvmClassBundle> getVersionedJvmClassBundles() {
+		public NavigableMap<Integer, VersionedJvmClassBundle> getVersionedJvmClassBundles() {
 			return Collections.emptyNavigableMap();
 		}
 
@@ -128,6 +129,22 @@ public class EmptyWorkspace extends BasicWorkspace {
 		@Override
 		public void close() {
 			// no-op
+		}
+
+		@Override
+		public <V> void setProperty(Property<V> property) {
+			// no-op
+		}
+
+		@Override
+		public void removeProperty(String key) {
+			// no-op
+		}
+
+		@Nonnull
+		@Override
+		public Map<String, Property<?>> getProperties() {
+			return Collections.emptyMap();
 		}
 	}
 }

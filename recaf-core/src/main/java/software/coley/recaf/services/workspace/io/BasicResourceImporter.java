@@ -1,30 +1,62 @@
 package software.coley.recaf.services.workspace.io;
 
 import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.slf4j.Logger;
+import software.coley.collections.Unchecked;
 import software.coley.lljzip.format.model.CentralDirectoryFileHeader;
 import software.coley.lljzip.format.model.ZipArchive;
 import software.coley.lljzip.util.ExtraFieldTime;
+import software.coley.lljzip.util.MemorySegmentUtil;
 import software.coley.recaf.analytics.logging.Logging;
-import software.coley.recaf.info.*;
+import software.coley.recaf.info.DexFileInfo;
+import software.coley.recaf.info.FileInfo;
+import software.coley.recaf.info.Info;
+import software.coley.recaf.info.JarFileInfo;
+import software.coley.recaf.info.JvmClassInfo;
+import software.coley.recaf.info.ModulesFileInfo;
+import software.coley.recaf.info.ZipFileInfo;
 import software.coley.recaf.info.builder.FileInfoBuilder;
+import software.coley.recaf.info.builder.ZipFileInfoBuilder;
 import software.coley.recaf.info.properties.builtin.*;
 import software.coley.recaf.services.Service;
-import software.coley.recaf.util.*;
+import software.coley.recaf.util.IOUtil;
+import software.coley.recaf.util.ModulesIOUtil;
+import software.coley.recaf.util.StringUtil;
+import software.coley.recaf.util.android.DexIOUtil;
 import software.coley.recaf.util.io.ByteSource;
 import software.coley.recaf.util.io.ByteSources;
 import software.coley.recaf.util.io.LocalFileHeaderSource;
-import software.coley.recaf.workspace.model.bundle.*;
-import software.coley.recaf.workspace.model.resource.*;
+import software.coley.recaf.workspace.model.bundle.AndroidClassBundle;
+import software.coley.recaf.workspace.model.bundle.BasicFileBundle;
+import software.coley.recaf.workspace.model.bundle.BasicJvmClassBundle;
+import software.coley.recaf.workspace.model.bundle.BasicVersionedJvmClassBundle;
+import software.coley.recaf.workspace.model.bundle.VersionedJvmClassBundle;
+import software.coley.recaf.workspace.model.resource.WorkspaceDirectoryResource;
+import software.coley.recaf.workspace.model.resource.WorkspaceFileResource;
+import software.coley.recaf.workspace.model.resource.WorkspaceFileResourceBuilder;
+import software.coley.recaf.workspace.model.resource.WorkspaceResource;
+import software.coley.recaf.workspace.model.resource.WorkspaceResourceBuilder;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.foreign.MemorySegment;
+import java.net.URI;
 import java.net.URL;
-import java.nio.file.*;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.Objects;
+import java.util.TreeMap;
 
 /**
  * Basic implementation of the resource importer.
@@ -40,7 +72,7 @@ public class BasicResourceImporter implements ResourceImporter, Service {
 
 	@Inject
 	public BasicResourceImporter(@Nonnull InfoImporter infoImporter,
-								 @Nonnull ResourceImporterConfig config) {
+	                             @Nonnull ResourceImporterConfig config) {
 		this.infoImporter = infoImporter;
 		this.config = config;
 	}
@@ -57,10 +89,13 @@ public class BasicResourceImporter implements ResourceImporter, Service {
 	 *
 	 * @return Read resource.
 	 */
-	private WorkspaceResource handleSingle(WorkspaceFileResourceBuilder builder,
-										   String pathName, ByteSource source) throws IOException {
+	private WorkspaceResource handleSingle(@Nonnull WorkspaceFileResourceBuilder builder,
+	                                       @Nonnull String pathName, @Nonnull ByteSource source) throws IOException {
 		// Read input as raw info in order to determine file-type.
-		Info readInfo = infoImporter.readInfo(pathName.substring(pathName.lastIndexOf('/') + 1), source);
+		PathAndName pathAndName = PathAndName.fromString(pathName);
+		String name = pathAndName.name;
+		Path localPath = pathAndName.path;
+		Info readInfo = infoImporter.readInfo(name, source);
 
 		// Check if it is a single class.
 		if (readInfo.isClass()) {
@@ -76,14 +111,15 @@ public class BasicResourceImporter implements ResourceImporter, Service {
 					.withName(readAsJvmClass.getName() + ".class")
 					.withRawContent(readAsJvmClass.getBytecode())
 					.build();
-			InputFilePathProperty.set(fileInfo, Paths.get(pathName)); // Associate input path with the read value.
+			if (localPath != null)
+				InputFilePathProperty.set(fileInfo, localPath); // Associate input path with the read value.
 			return builder.withFileInfo(fileInfo)
 					.withJvmClassBundle(bundle)
 					.build();
 		}
 
 		// Associate input path with the read value.
-		InputFilePathProperty.set(readInfo, Paths.get(pathName));
+		if (localPath != null) InputFilePathProperty.set(readInfo, localPath);
 
 		// Must be some non-class type of file.
 		FileInfo readInfoAsFile = readInfo.asFile();
@@ -93,6 +129,17 @@ public class BasicResourceImporter implements ResourceImporter, Service {
 		if (readInfoAsFile.isZipFile()) {
 			ZipFileInfo readInfoAsZip = readInfoAsFile.asZipFile();
 			return handleZip(builder, readInfoAsZip, source);
+		} else if (ZipMarkerProperty.get(readInfoAsFile)) {
+			// In some cases the file may have been matched as something else (like an executable)
+			// but also count as a ZIP container. Applications that bundle Java applications into native exe files
+			// tend to do this.
+			try {
+				return handleZip(builder, new ZipFileInfoBuilder(readInfoAsFile.toFileBuilder()).build(), source);
+			} catch (Throwable t) {
+				// Some files will just so happen to have a ZIP marker in their bytes but not represent an actual ZIP.
+				// This is fine because by this point we have an info-type to fall back on.
+				logger.debug("Saw ZIP marker in file {} but could not parse as ZIP.", name);
+			}
 		}
 
 		// Check for DEX file format.
@@ -122,12 +169,26 @@ public class BasicResourceImporter implements ResourceImporter, Service {
 		BasicJvmClassBundle classes = new BasicJvmClassBundle();
 		BasicFileBundle files = new BasicFileBundle();
 		Map<String, AndroidClassBundle> androidClassBundles = new HashMap<>();
-		NavigableMap<Integer, JvmClassBundle> versionedJvmClassBundles = new TreeMap<>();
+		NavigableMap<Integer, VersionedJvmClassBundle> versionedJvmClassBundles = new TreeMap<>();
 		Map<String, WorkspaceFileResource> embeddedResources = new HashMap<>();
 
-		// Read ZIP entries
+		// Read ZIP
 		boolean isAndroid = zipInfo.getName().toLowerCase().endsWith(".apk");
 		ZipArchive archive = config.mapping().apply(source.readAll());
+
+		// Sanity check, if there's data at the head of the file AND its otherwise empty its probably junk.
+		MemorySegment prefixData = archive.getPrefixData();
+		if (prefixData != null && archive.getEnd() != null && archive.getParts().size() == 1) {
+			// We'll throw as the caller should catch this case and handle it based on their needs.
+			throw new IOException("Content matched ZIP header but had no file entries");
+		}
+
+		// Record prefix data to attribute held by the zip file info.
+		if (prefixData != null) {
+			ZipPrefixDataProperty.set(zipInfo, MemorySegmentUtil.toByteArray(prefixData));
+		}
+
+		// Build model from the contained files in the ZIP
 		archive.getLocalFiles().forEach(header -> {
 			LocalFileHeaderSource headerSource = new LocalFileHeaderSource(header, isAndroid);
 			String entryName = header.getFileNameAsString();
@@ -196,7 +257,7 @@ public class BasicResourceImporter implements ResourceImporter, Service {
 		BasicJvmClassBundle classes = new BasicJvmClassBundle();
 		BasicFileBundle files = new BasicFileBundle();
 		Map<String, AndroidClassBundle> androidClassBundles = new HashMap<>();
-		NavigableMap<Integer, JvmClassBundle> versionedJvmClassBundles = new TreeMap<>();
+		NavigableMap<Integer, VersionedJvmClassBundle> versionedJvmClassBundles = new TreeMap<>();
 		Map<String, WorkspaceFileResource> embeddedResources = new HashMap<>();
 
 		// Walk the directory
@@ -232,13 +293,13 @@ public class BasicResourceImporter implements ResourceImporter, Service {
 	}
 
 	private void addInfo(BasicJvmClassBundle classes,
-						 BasicFileBundle files,
-						 Map<String, AndroidClassBundle> androidClassBundles,
-						 NavigableMap<Integer, JvmClassBundle> versionedJvmClassBundles,
-						 Map<String, WorkspaceFileResource> embeddedResources,
-						 ByteSource infoSource,
-						 String pathName,
-						 Info info) {
+	                     BasicFileBundle files,
+	                     Map<String, AndroidClassBundle> androidClassBundles,
+	                     NavigableMap<Integer, VersionedJvmClassBundle> versionedJvmClassBundles,
+	                     Map<String, WorkspaceFileResource> embeddedResources,
+	                     ByteSource infoSource,
+	                     String pathName,
+	                     Info info) {
 		if (info.isClass()) {
 			// Must be a JVM class since Android classes do not exist in single-file form.
 			JvmClassInfo classInfo = info.asClass().asJvmClass();
@@ -298,7 +359,7 @@ public class BasicResourceImporter implements ResourceImporter, Service {
 					// Put it into the correct versioned class bundle.
 					int version = Integer.parseInt(versionName);
 					BasicJvmClassBundle bundle = (BasicJvmClassBundle) versionedJvmClassBundles
-							.computeIfAbsent(version, BasicVersionedClassBundle::new);
+							.computeIfAbsent(version, BasicVersionedJvmClassBundle::new);
 
 					// Handle duplicate classes
 					JvmClassInfo existingClass = bundle.get(className);
@@ -410,7 +471,7 @@ public class BasicResourceImporter implements ResourceImporter, Service {
 	 * 		Target file bundle for fallback item placement.
 	 */
 	private void deduplicateClass(JvmClassInfo existingClass, JvmClassInfo currentClass,
-								  BasicJvmClassBundle classes, BasicFileBundle files) {
+	                              BasicJvmClassBundle classes, BasicFileBundle files) {
 		String className = currentClass.getName();
 		String existingPrefix = PathPrefixProperty.get(existingClass);
 		String existingSuffix = PathSuffixProperty.get(existingClass);
@@ -571,11 +632,16 @@ public class BasicResourceImporter implements ResourceImporter, Service {
 	@Override
 	public WorkspaceResource importResource(@Nonnull URL url) throws IOException {
 		// Extract name from URL
-		String path = url.getFile();
-		if (path.isEmpty())
+		String path;
+		if (url.getProtocol().equals("file")) {
+			path = url.getFile();
+			if (path.isEmpty())
+				path = url.toString();
+			if (path.charAt(0) == '/')
+				path = path.substring(1);
+		} else {
 			path = url.toString();
-		if (path.charAt(0) == '/')
-			path = path.substring(1);
+		}
 
 		// Load content, parse into resource.
 		byte[] bytes = IOUtil.toByteArray(url.openStream());
@@ -593,5 +659,54 @@ public class BasicResourceImporter implements ResourceImporter, Service {
 	@Override
 	public ResourceImporterConfig getServiceConfig() {
 		return config;
+	}
+
+	private record PathAndName(@Nullable Path path, @Nonnull String name) {
+		@Nonnull
+		private static PathAndName fromString(@Nonnull String pathName) {
+			if (pathName.contains("://")) {
+				// Absolute URI paths
+				if (pathName.startsWith("file://")) {
+					return fromUriString(pathName);
+				} else {
+					// Probably something like "https://foo.com/bar.zip"
+					// Try normalizing a simple name out of it if possible.
+					while (pathName.endsWith("/")) pathName = pathName.substring(0, pathName.length() - 1);
+					String name = pathName.substring(pathName.lastIndexOf('/') + 1);
+					if (!name.matches("\\w+")) name = "remote";
+					return new PathAndName(null, name);
+				}
+			} else if (pathName.startsWith("file:./")) {
+				// Relative URI paths
+				return fromUriString(pathName);
+			} else {
+				// Probably local file paths
+				Path localPath;
+				try {
+					// Try and resolve a file path to the give path-name.
+					// In some cases the input name is a remote resource not covered by the block above,
+					// so we don't really care if it fails. That just means it is a remote resource of some kind.
+					localPath = Paths.get(pathName);
+				} catch (Throwable t) {
+					localPath = null;
+				}
+				return new PathAndName(localPath, pathName.substring(pathName.lastIndexOf('/') + 1));
+			}
+		}
+
+		@Nonnull
+		private static PathAndName fromUriString(@Nonnull String pathName) {
+			String name;
+			Path localPath;
+			name = pathName.substring(pathName.lastIndexOf('/') + 1);
+			try {
+				// Try and resolve a file path to the give path-name.
+				// It should be an absolute path.
+				localPath = Paths.get(URI.create(pathName));
+			} catch (Throwable t) {
+				localPath = null;
+			}
+			return new PathAndName(localPath, name);
+		}
 	}
 }

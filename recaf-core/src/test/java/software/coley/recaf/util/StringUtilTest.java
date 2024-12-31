@@ -1,10 +1,18 @@
 package software.coley.recaf.util;
 
+import jakarta.annotation.Nonnull;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import software.coley.recaf.test.TestBase;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Collections;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -12,6 +20,60 @@ import static org.junit.jupiter.api.Assertions.*;
  * Tests for {@link StringUtil}
  */
 class StringUtilTest {
+	@Test
+	void indicesOf() {
+		assertArrayEquals(new int[]{0}, StringUtil.indicesOf("\n", '\n'));
+		assertArrayEquals(new int[]{0, 1, 2}, StringUtil.indicesOf("\n\n\n", '\n'));
+		assertArrayEquals(new int[]{1, 3, 4}, StringUtil.indicesOf("a\na\n\n", '\n'));
+		assertArrayEquals(new int[]{0, 1, 3}, StringUtil.indicesOf("\n\na\na", '\n'));
+	}
+
+	@Test
+	void testFastSplit() {
+		// Empty discarded
+		assertEquals(List.of("a", "b", "c", "d"), StringUtil.fastSplit("a/b/c/d", false, '/'));
+		assertEquals(List.of("a", "b", "c"), StringUtil.fastSplit("a/b/c/", false, '/'));
+		assertEquals(List.of("b", "c", "d"), StringUtil.fastSplit("/b/c/d", false, '/'));
+		assertEquals(Collections.emptyList(), StringUtil.fastSplit("/", false, '/'));
+		assertEquals(Collections.emptyList(), StringUtil.fastSplit("//", false, '/'));
+		assertEquals(Collections.emptyList(), StringUtil.fastSplit("///", false, '/'));
+
+		// Empty included
+		assertEquals(List.of("a", "b", "c", ""), StringUtil.fastSplit("a/b/c/", true, '/'));
+		assertEquals(List.of("", "b", "c", "d"), StringUtil.fastSplit("/b/c/d", true, '/'));
+		assertEquals(List.of("", ""), StringUtil.fastSplit("/", true, '/'));
+		assertEquals(List.of("", "", ""), StringUtil.fastSplit("//", true, '/'));
+		assertEquals(List.of("", "", "", ""), StringUtil.fastSplit("///", true, '/'));
+	}
+
+	@Test
+	void testGetTabAdjustedLength() {
+		assertEquals(4, StringUtil.getTabAdjustedLength("\t", 4));
+		assertEquals(4, StringUtil.getTabAdjustedLength(" \t", 4));
+		assertEquals(4, StringUtil.getTabAdjustedLength("  \t", 4));
+		assertEquals(4, StringUtil.getTabAdjustedLength("   \t", 4));
+		assertEquals(4, StringUtil.getTabAdjustedLength("    ", 4));
+		assertEquals(10, StringUtil.getTabAdjustedLength("\t\t", 5));
+		assertEquals(10, StringUtil.getTabAdjustedLength(" \t\t", 5));
+		assertEquals(10, StringUtil.getTabAdjustedLength("  \t\t", 5));
+		assertEquals(10, StringUtil.getTabAdjustedLength("   \t\t", 5));
+		assertEquals(10, StringUtil.getTabAdjustedLength("     \t", 5));
+	}
+
+	@Test
+	void testGetWhitespacePrefixLength() {
+		assertEquals(4, StringUtil.getWhitespacePrefixLength("    text", 4));
+		assertEquals(4, StringUtil.getWhitespacePrefixLength("   \ttext", 4));
+		assertEquals(4, StringUtil.getWhitespacePrefixLength("  \ttext", 4));
+		assertEquals(4, StringUtil.getWhitespacePrefixLength(" \ttext", 4));
+		assertEquals(4, StringUtil.getWhitespacePrefixLength("\ttext", 4));
+		assertEquals(8, StringUtil.getWhitespacePrefixLength("    \ttext", 4));
+		assertEquals(8, StringUtil.getWhitespacePrefixLength("   \t \ttext", 4));
+		assertEquals(8, StringUtil.getWhitespacePrefixLength("  \t   \ttext", 4));
+		assertEquals(8, StringUtil.getWhitespacePrefixLength("\t \ttext", 4));
+		assertEquals(8, StringUtil.getWhitespacePrefixLength(" \t   \ttext", 4));
+	}
+
 	@Test
 	void testSplitNewline() {
 		assertEquals(1, StringUtil.splitNewline("").length);
@@ -216,9 +278,29 @@ class StringUtilTest {
 
 	@Test
 	void testGetCommonPrefix() {
+		assertEquals("", StringUtil.getCommonPrefix("", ""));
 		assertEquals("1", StringUtil.getCommonPrefix("123", "1bc"));
 		assertEquals("", StringUtil.getCommonPrefix("aaa", "bbb"));
 		assertEquals("com/", StringUtil.getCommonPrefix("com/foo", "com/bar"));
+	}
+
+	@Test
+	void testGetCommonSuffix() {
+		assertEquals("", StringUtil.getCommonSuffix("", ""));
+		assertEquals("1", StringUtil.getCommonSuffix("321", "ab1"));
+		assertEquals("1", StringUtil.getCommonSuffix("31", "ab1"));
+		assertEquals("1", StringUtil.getCommonSuffix("1", "ab1"));
+		assertEquals("", StringUtil.getCommonSuffix("", "ab1"));
+		assertEquals("", StringUtil.getCommonSuffix("ab1", ""));
+		assertEquals("", StringUtil.getCommonSuffix("aaa", "bbb"));
+		String codeIfElse = """
+				if (bar())
+				   println("is bar");
+				else
+				   println("not bar");""";
+		String codeTernary = """
+				println(bar() ? "is bar" : "not bar");""";
+		assertEquals("\"not bar\");", StringUtil.getCommonSuffix(codeIfElse, codeTernary));
 	}
 
 	@Test
@@ -292,25 +374,77 @@ class StringUtilTest {
 		assertEquals(10, generated.length());
 	}
 
-	@Test
-	void testIsText() {
-		// Text only
-		assertTrue(StringUtil.isText("hello".getBytes(StandardCharsets.UTF_8)));
-		assertTrue(StringUtil.isText("12345".getBytes(StandardCharsets.UTF_8)));
+	@Nested
+	class StringDecoding {
+		@Test
+		void testDecodeString() {
+			// Text only
+			var result = StringUtil.decodeString("hello".getBytes(StandardCharsets.UTF_8));
+			assertTrue(result.couldDecode(), "Failed to decode 'hello' in UTF8");
+			assertEquals("hello", result.text(), "Decoded result did not yield original content");
+			assertEquals(StandardCharsets.UTF_8, result.charset(), "Unexpected charset for decoding 'hello' in UTF8");
 
-		// Control category only
-		assertFalse(StringUtil.isText("\0\1\2\3".getBytes(StandardCharsets.UTF_8)));
+			result = StringUtil.decodeString("hello".getBytes(StandardCharsets.ISO_8859_1));
+			assertTrue(result.couldDecode(), "Failed to decode 'hello' in ISO_8859_1");
+			assertEquals("hello", result.text(), "Decoded result did not yield original content");
+			assertEquals(StandardCharsets.UTF_8, result.charset(), "Unexpected charset for decoding 'hello' in ISO_8859_1");
 
-		// Format category only
-		assertFalse(StringUtil.isText("\u00AD\u0600\u202E\uFFFA".getBytes(StandardCharsets.UTF_8)));
+			result = StringUtil.decodeString("12345".getBytes(StandardCharsets.UTF_8));
+			assertTrue(result.couldDecode(), "Failed to decode '12345' in UTF8");
+			assertEquals("12345", result.text(), "Decoded result did not yield original content");
 
-		// Private use category only
-		assertFalse(StringUtil.isText("\uE000\uE001\uE002\uE003".getBytes(StandardCharsets.UTF_8)));
+			// Ensure that long text doesn't get decoded wrong.
+			String longString = "\"the quick brown fox jumps over the lazy dog\"".repeat(2000);
+			result = StringUtil.decodeString(longString.getBytes(StandardCharsets.ISO_8859_1));
+			assertTrue(result.couldDecode(), "Failed to decode 'the-quick-brown-fox' in ISO_8859_1");
+			assertEquals(longString, result.text(), "Decoded result did not yield original content");
 
-		// Surrogate category only
-		assertFalse(StringUtil.isText("\uD83C\uDF09\uD83C\uDF09".getBytes(StandardCharsets.UTF_8)));
+			// Empty
+			result = StringUtil.decodeString(new byte[0]);
+			assertFalse(result.couldDecode(), "Should fail to decode empty data");
 
-		// Unassigned category only
-		assertFalse(StringUtil.isText("\u0378\u0378\u0378\u0378".getBytes(StandardCharsets.UTF_8)));
+			// Control category only
+			result = StringUtil.decodeString("\0\1\2\3".getBytes(StandardCharsets.UTF_8));
+			assertFalse(result.couldDecode(), "Should fail to decode control category chars");
+
+			// Format category only
+			result = StringUtil.decodeString("\u00AD\u0600\u202E\uFFFA".getBytes(StandardCharsets.UTF_8));
+			assertFalse(result.couldDecode(), "Should fail to decode format category chars");
+
+			// Private use category only
+			result = StringUtil.decodeString("\uE000\uE001\uE002\uE003".getBytes(StandardCharsets.UTF_8));
+			assertFalse(result.couldDecode(), "Should fail to decode private-use category chars");
+
+			// Surrogate category only
+			result = StringUtil.decodeString("\uD83C\uDF09\uD83C\uDF09".getBytes(StandardCharsets.UTF_8));
+			assertFalse(result.couldDecode(), "Should fail to decode surrogate category chars");
+
+			// Unassigned category only
+			result = StringUtil.decodeString("\u0378\u0378\u0378\u0378".getBytes(StandardCharsets.UTF_8));
+			assertEquals(StandardCharsets.ISO_8859_1, result.charset(), "Should fail to decode unassigned category chars as UTF8 - fall back to ISO_8859_1");
+
+			// Chars outside the acceptable range won't get decoded, which tells us our input has non-text chars.
+			result = StringUtil.decodeString(new byte[]{0, 1, 15, 20, 26, 31});
+			assertFalse(result.couldDecode(), "Should fail to decode with control chars (char < 32)");
+		}
+
+		@ParameterizedTest
+		@ValueSource(strings = {
+			 	"lorem-long-ascii.txt",
+			 	"lorem-long-cn.txt",
+			 	"lorem-long-ru.txt",
+			 	"lorem-short-ascii.txt",
+			 	"lorem-short-cn.txt",
+				"lorem-short-ru.txt"
+		})
+		void testDecodeLoremIpsum(@Nonnull String name) throws Exception {
+			decodeFromPath(name);
+		}
+
+		void decodeFromPath(@Nonnull String path) throws Exception {
+			byte[] bytes = Files.readAllBytes(Paths.get("src/testFixtures/resources/" + path));
+			var result = StringUtil.decodeString(bytes);
+			assertTrue(result.couldDecode());
+		}
 	}
 }

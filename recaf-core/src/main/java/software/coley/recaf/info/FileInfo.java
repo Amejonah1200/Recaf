@@ -25,6 +25,18 @@ public interface FileInfo extends Info, Named {
 	byte[] getRawContent();
 
 	/**
+	 * @return File extension of {@link #getName() the file name}, if any exists.
+	 */
+	@Nullable
+	default String getFileExtension() {
+		String fileName = getName();
+		int i = fileName.indexOf('.') + 1;
+		if (i > 0)
+			return fileName.toLowerCase().substring(i);
+		return null;
+	}
+
+	/**
 	 * @return Directory the file resides in.
 	 * May be {@code null} for files in the root directory.
 	 */
@@ -81,6 +93,14 @@ public interface FileInfo extends Info, Named {
 	}
 
 	/**
+	 * @return Self cast to video file.
+	 */
+	@Nonnull
+	default NativeLibraryFileInfo asNativeLibraryFile() {
+		throw new IllegalStateException("Non-native-library file cannot be cast to native-library file");
+	}
+
+	/**
 	 * @return Self cast to zip file.
 	 */
 	@Nonnull
@@ -123,6 +143,13 @@ public interface FileInfo extends Info, Named {
 	 * @return {@code true} if self is a video file.
 	 */
 	default boolean isVideoFile() {
+		return false;
+	}
+
+	/**
+	 * @return {@code true} if self is a native-library file.
+	 */
+	default boolean isNativeLibraryFile() {
 		return false;
 	}
 

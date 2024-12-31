@@ -12,6 +12,7 @@ allprojects {
 subprojects {
     apply plugin: 'java'
     apply plugin: 'jacoco'
+    apply plugin: 'maven-publish'
     apply plugin: 'com.github.ben-manes.versions'
 
     repositories {
@@ -50,17 +51,15 @@ subprojects {
     // gradlew -q javaToolchains - see the list of detected toolchains.
     java {
         toolchain {
-            languageVersion = JavaLanguageVersion.of(17)
+            languageVersion = JavaLanguageVersion.of(22)
         }
     }
 
     // Append options for unchecked/deprecation
-    gradle.projectsEvaluated {
-        tasks.withType(JavaCompile).configureEach {
-            options.compilerArgs << "-Xlint:unchecked" << "-Xlint:deprecation"
-            options.encoding = 'UTF-8'
-            options.incremental = true
-        }
+    tasks.withType(JavaCompile).configureEach {
+        options.compilerArgs << '-Xlint:unchecked' << '-Xlint:deprecation' << '-g' << '-parameters'
+        options.encoding = 'UTF-8'
+        options.incremental = true
     }
 
     // Enable automatic generation of null checks on annotated methods
@@ -74,10 +73,14 @@ subprojects {
     test {
         useJUnitPlatform()
 
+        // Required for Mockito in newer JDK's which disable useful features by default for 'integrity' reasons.
+        jvmArgs '-XX:+EnableDynamicAgentLoading'
+
         systemProperty 'junit.jupiter.execution.parallel.enabled', true
         systemProperty 'junit.jupiter.execution.parallel.mode.default', 'concurrent'
 
         testLogging {
+            showStandardStreams = true
             events "passed", "skipped", "failed"
         }
     }
@@ -107,8 +110,23 @@ subprojects {
         reports.html.required = false
         reports.junitXml.required = true
 
+        // We want to cover all recaf classes, but not the test classes themselves.
+        // The exclusion list is applied after the inclusion list, so this ends up working out.
         jacoco {
             includes = ['software/coley/recaf/**']
+            excludes = ['software/coley/recaf/**Test']
+        }
+    }
+
+    // Setup artifact publishing to maven local
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                from components.java
+            }
+        }
+        repositories {
+            mavenLocal()
         }
     }
 }

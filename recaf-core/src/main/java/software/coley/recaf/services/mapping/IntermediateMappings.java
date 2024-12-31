@@ -7,7 +7,14 @@ import software.coley.recaf.services.mapping.data.FieldMapping;
 import software.coley.recaf.services.mapping.data.MethodMapping;
 import software.coley.recaf.services.mapping.data.VariableMapping;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Collection of object representations of mappings.
@@ -28,6 +35,7 @@ public class IntermediateMappings implements Mappings {
 	 * 		Post-mapping name.
 	 */
 	public void addClass(String oldName, String newName) {
+		if (Objects.equals(oldName, newName)) return; // Skip identity mappings
 		classes.put(oldName, new ClassMapping(oldName, newName));
 	}
 
@@ -42,6 +50,7 @@ public class IntermediateMappings implements Mappings {
 	 * 		Post-mapping field name.
 	 */
 	public void addField(String ownerName, String desc, String oldName, String newName) {
+		if (Objects.equals(oldName, newName)) return; // Skip identity mappings
 		fields.computeIfAbsent(ownerName, n -> new ArrayList<>())
 				.add(new FieldMapping(ownerName, oldName, desc, newName));
 	}
@@ -57,6 +66,7 @@ public class IntermediateMappings implements Mappings {
 	 * 		Post-mapping method name.
 	 */
 	public void addMethod(String ownerName, String desc, String oldName, String newName) {
+		if (Objects.equals(oldName, newName)) return; // Skip identity mappings
 		methods.computeIfAbsent(ownerName, n -> new ArrayList<>())
 				.add(new MethodMapping(ownerName, oldName, desc, newName));
 	}
@@ -78,8 +88,9 @@ public class IntermediateMappings implements Mappings {
 	 * 		Post-mapping method name.
 	 */
 	public void addVariable(String ownerName, String methodName, String methodDesc,
-							String desc, String oldName, int index,
-							String newName) {
+	                        String desc, String oldName, int index,
+	                        String newName) {
+		if (Objects.equals(oldName, newName)) return; // Skip identity mappings
 		String key = varKey(ownerName, methodName, methodDesc);
 		variables.computeIfAbsent(key, n -> new ArrayList<>())
 				.add(new VariableMapping(ownerName, methodName, methodDesc, desc, oldName, index, newName));
@@ -210,7 +221,7 @@ public class IntermediateMappings implements Mappings {
 	@Nullable
 	@Override
 	public String getMappedVariableName(@Nonnull String className, @Nonnull String methodName, @Nonnull String methodDesc,
-										@Nullable String name, @Nullable String desc, int index) {
+	                                    @Nullable String name, @Nullable String desc, int index) {
 		List<VariableMapping> variablesInMethod = getMethodVariableMappings(className, methodName, methodDesc);
 		for (VariableMapping variable : variablesInMethod) {
 			if (equalsOrNull(desc, variable.getDesc()) && equalsOrNull(name, variable.getOldName())
@@ -227,15 +238,16 @@ public class IntermediateMappings implements Mappings {
 		return this;
 	}
 
-	private static String varKey(String ownerName, String methodName, String methodDesc) {
-		return String.format("%s\t%s\t%s", ownerName, methodName, methodDesc);
+	@Nonnull
+	protected static String varKey(@Nonnull String ownerName, @Nonnull String methodName, @Nonnull String methodDesc) {
+		return ownerName + "\t" + methodName + "\t" + methodDesc;
 	}
 
 	private static boolean indexEqualsOrOOB(int a, int b) {
 		return a < 0 || b < 0 || a == b;
 	}
 
-	private static boolean equalsOrNull(String a, String b) {
+	private static boolean equalsOrNull(@Nullable String a, @Nullable String b) {
 		return a == null || b == null || a.equals(b);
 	}
 }

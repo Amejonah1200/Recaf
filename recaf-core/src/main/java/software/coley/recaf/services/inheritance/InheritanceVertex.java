@@ -9,7 +9,11 @@ import software.coley.recaf.util.Streams;
 import software.coley.recaf.workspace.model.Workspace;
 import software.coley.recaf.workspace.model.resource.WorkspaceResource;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -38,8 +42,8 @@ public class InheritanceVertex {
 	 * 		Flag for if the class belongs to a workspaces primary resource.
 	 */
 	public InheritanceVertex(@Nonnull ClassInfo value,
-							 @Nonnull Function<String, InheritanceVertex> lookup,
-							 @Nonnull Function<String, Collection<String>> childrenLookup, boolean isPrimary) {
+	                         @Nonnull Function<String, InheritanceVertex> lookup,
+	                         @Nonnull Function<String, Collection<String>> childrenLookup, boolean isPrimary) {
 		this.value = value;
 		this.lookup = lookup;
 		this.childrenLookup = childrenLookup;
@@ -54,7 +58,7 @@ public class InheritanceVertex {
 	 *
 	 * @return If the field exists in the current vertex.
 	 */
-	public boolean hasField(String name, String desc) {
+	public boolean hasField(@Nonnull String name, @Nonnull String desc) {
 		for (FieldMember fn : value.getFields())
 			if (fn.getName().equals(name) && fn.getDescriptor().equals(desc))
 				return true;
@@ -69,7 +73,7 @@ public class InheritanceVertex {
 	 *
 	 * @return If the field exists in the current vertex or in any parent vertex.
 	 */
-	public boolean hasFieldInSelfOrParents(String name, String desc) {
+	public boolean hasFieldInSelfOrParents(@Nonnull String name, @Nonnull String desc) {
 		if (hasField(name, desc))
 			return true;
 		return allParents()
@@ -85,7 +89,7 @@ public class InheritanceVertex {
 	 *
 	 * @return If the field exists in the current vertex or in any child vertex.
 	 */
-	public boolean hasFieldInSelfOrChildren(String name, String desc) {
+	public boolean hasFieldInSelfOrChildren(@Nonnull String name, @Nonnull String desc) {
 		if (hasField(name, desc))
 			return true;
 		return allChildren()
@@ -101,7 +105,7 @@ public class InheritanceVertex {
 	 *
 	 * @return If the method exists in the current vertex.
 	 */
-	public boolean hasMethod(String name, String desc) {
+	public boolean hasMethod(@Nonnull String name, @Nonnull String desc) {
 		for (MethodMember mn : value.getMethods())
 			if (mn.getName().equals(name) && mn.getDescriptor().equals(desc))
 				return true;
@@ -116,7 +120,7 @@ public class InheritanceVertex {
 	 *
 	 * @return If the method exists in the current vertex or in any parent vertex.
 	 */
-	public boolean hasMethodInSelfOrParents(String name, String desc) {
+	public boolean hasMethodInSelfOrParents(@Nonnull String name, @Nonnull String desc) {
 		if (hasMethod(name, desc))
 			return true;
 		return allParents()
@@ -132,7 +136,7 @@ public class InheritanceVertex {
 	 *
 	 * @return If the method exists in the current vertex or in any child vertex.
 	 */
-	public boolean hasMethodInSelfOrChildren(String name, String desc) {
+	public boolean hasMethodInSelfOrChildren(@Nonnull String name, @Nonnull String desc) {
 		if (hasMethod(name, desc))
 			return true;
 		return allChildren()
@@ -181,15 +185,17 @@ public class InheritanceVertex {
 	 * @return {@code true} if method is an extension of an outside class's methods and thus should not be renamed.
 	 * {@code false} if the method is safe to rename.
 	 */
-	public boolean isLibraryMethod(String name, String desc) {
+	public boolean isLibraryMethod(@Nonnull String name, @Nonnull String desc) {
 		// Check against this definition
 		if (!isPrimary && hasMethod(name, desc))
 			return true;
+
 		// Check parents.
 		// If we extend a class with a library definition then it should be considered a library method.
 		for (InheritanceVertex parent : getParents())
 			if (parent.isLibraryMethod(name, desc))
 				return true;
+
 		// No library definition found, so its safe to rename.
 		return false;
 	}
@@ -200,7 +206,7 @@ public class InheritanceVertex {
 	 *
 	 * @return {@code true} if the vertex is of a child type to this vertex's {@link #getName() type}.
 	 */
-	public boolean isParentOf(InheritanceVertex vertex) {
+	public boolean isParentOf(@Nonnull InheritanceVertex vertex) {
 		return vertex.getAllParents().contains(this);
 	}
 
@@ -210,7 +216,7 @@ public class InheritanceVertex {
 	 *
 	 * @return {@code true} if the vertex is of a parent type to this vertex's {@link #getName() type}.
 	 */
-	public boolean isChildOf(InheritanceVertex vertex) {
+	public boolean isChildOf(@Nonnull InheritanceVertex vertex) {
 		return getAllParents().contains(vertex);
 	}
 
@@ -220,7 +226,7 @@ public class InheritanceVertex {
 	 *
 	 * @return {@code true} if the vertex is a family member, but is not a child or parent of the current vertex.
 	 */
-	public boolean isIndirectFamilyMember(InheritanceVertex vertex) {
+	public boolean isIndirectFamilyMember(@Nonnull InheritanceVertex vertex) {
 		return isIndirectFamilyMember(getFamily(true), vertex);
 	}
 
@@ -232,7 +238,7 @@ public class InheritanceVertex {
 	 *
 	 * @return {@code true} if the vertex is a family member, but is not a child or parent of the current vertex.
 	 */
-	public boolean isIndirectFamilyMember(Set<InheritanceVertex> family, InheritanceVertex vertex) {
+	public boolean isIndirectFamilyMember(@Nonnull Set<InheritanceVertex> family, @Nonnull InheritanceVertex vertex) {
 		return this != vertex &&
 				family.contains(vertex) &&
 				!isChildOf(vertex) &&
@@ -282,7 +288,7 @@ public class InheritanceVertex {
 		return vertices;
 	}
 
-	private void visitFamily(Set<InheritanceVertex> vertices) {
+	private void visitFamily(@Nonnull Set<InheritanceVertex> vertices) {
 		if (isModule())
 			return;
 		if (vertices.add(this) && !isJavaLangObject())
@@ -431,12 +437,7 @@ public class InheritanceVertex {
 	 */
 	public void setValue(@Nonnull ClassInfo value) {
 		this.value = value;
-
-		// Reset children & parent sets
-		synchronized (this) {
-			children = null;
-			parents = null;
-		}
+		clearCachedVertices();
 	}
 
 	@Override

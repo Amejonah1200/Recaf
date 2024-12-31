@@ -5,7 +5,9 @@ import jakarta.annotation.Nullable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import software.coley.recaf.info.ClassInfo;
+import software.coley.recaf.info.member.ClassMember;
 import software.coley.recaf.info.member.FieldMember;
+import software.coley.recaf.info.member.LocalVariable;
 import software.coley.recaf.info.member.MethodMember;
 import software.coley.recaf.services.Service;
 import software.coley.recaf.services.inheritance.InheritanceGraph;
@@ -19,7 +21,12 @@ import software.coley.recaf.workspace.model.Workspace;
 import software.coley.recaf.workspace.model.bundle.Bundle;
 import software.coley.recaf.workspace.model.resource.WorkspaceResource;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.TreeMap;
 
 /**
  * Mapping generator.
@@ -53,10 +60,10 @@ public class MappingGenerator implements Service {
 	 */
 	@Nonnull
 	public Mappings generate(@Nullable Workspace workspace,
-							 @Nonnull WorkspaceResource resource,
-							 @Nonnull InheritanceGraph inheritanceGraph,
-							 @Nonnull NameGenerator generator,
-							 @Nullable NameGeneratorFilter filter) {
+	                         @Nonnull WorkspaceResource resource,
+	                         @Nonnull InheritanceGraph inheritanceGraph,
+	                         @Nonnull NameGenerator generator,
+	                         @Nullable NameGeneratorFilter filter) {
 		// Adapt filter to handle baseline cases.
 		filter = new ExcludeEnumMethodsFilter(filter);
 
@@ -91,15 +98,15 @@ public class MappingGenerator implements Service {
 	}
 
 	private void generateFamilyMappings(@Nonnull MappingsAdapter mappings, @Nonnull Set<InheritanceVertex> family,
-										@Nonnull NameGenerator generator, @Nonnull NameGeneratorFilter filter) {
+	                                    @Nonnull NameGenerator generator, @Nonnull NameGeneratorFilter filter) {
 		// Collect the members in the family that are inheritable, and methods that are library implementations.
 		// We want this information so that for these members we give them a single name throughout the family.
 		//  - Methods can be indirectly linked by two interfaces describing the same signature,
 		//    and a child type implementing both types. So we have to be strict with naming with cases like this.
 		//  - Fields do not have such a concern, but can still be accessed by child type owners.
-		Set<FieldMember> inheritableFields = new HashSet<>();
-		Set<MethodMember> inheritableMethods = new HashSet<>();
-		Set<MethodMember> libraryMethods = new HashSet<>();
+		Set<MemberKey> inheritableFields = new HashSet<>();
+		Set<MemberKey> inheritableMethods = new HashSet<>();
+		Set<MemberKey> libraryMethods = new HashSet<>();
 		family.forEach(vertex -> {
 			// Skip module-info classes
 			if (vertex.isModule())
@@ -109,17 +116,18 @@ public class MappingGenerator implements Service {
 			for (FieldMember field : vertex.getValue().getFields()) {
 				if (field.hasPrivateModifier())
 					continue;
-				inheritableFields.add(field);
+				inheritableFields.add(MemberKey.of(field));
 			}
 			for (MethodMember method : vertex.getValue().getMethods()) {
 				if (method.hasPrivateModifier())
 					continue;
-				inheritableMethods.add(method);
+				MemberKey key = MemberKey.of(method);
+				inheritableMethods.add(key);
 
 				// Need to track which methods we cannot remap due to them being overrides of libraries
 				// rather than being declared solely in our resource.
 				if (vertex.isLibraryMethod(method.getName(), method.getDescriptor()))
-					libraryMethods.add(method);
+					libraryMethods.add(key);
 			}
 		});
 		// Create mappings for members.
@@ -127,6 +135,7 @@ public class MappingGenerator implements Service {
 			// Skip libraries in the family.
 			if (vertex.isLibraryVertex())
 				return;
+
 			// Skip module-info classes
 			if (vertex.isModule())
 				return;
@@ -146,8 +155,9 @@ public class MappingGenerator implements Service {
 					continue;
 
 				// Create mapped name and record into mappings.
+				MemberKey key = MemberKey.of(field);
 				String mappedFieldName = generator.mapField(owner, field);
-				if (inheritableFields.contains(field)) {
+				if (inheritableFields.contains(key)) {
 					// Field is 'inheritable' meaning it needs to have a consistent name
 					// for all children and parents of this vertex.
 					Set<InheritanceVertex> targetFamilyMembers = new HashSet<>();
@@ -170,7 +180,7 @@ public class MappingGenerator implements Service {
 				String methodDesc = method.getDescriptor();
 
 				// Skip if reserved method name.
-				if (methodName.length() > 0 && methodName.charAt(0) == '<')
+				if (!methodName.isEmpty() && methodName.charAt(0) == '<')
 					continue;
 
 				// Skip if filtered.
@@ -178,8 +188,28 @@ public class MappingGenerator implements Service {
 					continue;
 
 				// Skip if method is a library method, or is already mapped.
-				if (libraryMethods.contains(method) || mappings.getMappedMethodName(ownerName, methodName, methodDesc) != null)
+				MemberKey key = MemberKey.of(method);
+				if (libraryMethods.contains(key) || mappings.getMappedMethodName(ownerName, methodName, methodDesc) != null)
 					continue;
+
+				// Create variable mappings
+				for (LocalVariable variable : method.getLocalVariables()) {
+					String variableName = variable.getName();
+
+					// Do not rename 'this' local variable... Unless its not "this" then force it to be "this"
+					if (variable.getIndex() == 0 && !method.hasStaticModifier()) {
+						if (!"this".equals(variableName))
+							mappings.addVariable(ownerName, methodName, methodDesc, variableName, variable.getDescriptor(), variable.getIndex(), "this");
+						continue;
+					}
+
+					if (filter.shouldMapLocalVariable(owner, method, variable)) {
+						String mappedVariableName = generator.mapVariable(owner, method, variable);
+						if (!mappedVariableName.equals(variableName)) {
+							mappings.addVariable(ownerName, methodName, methodDesc, variableName, variable.getDescriptor(), variable.getIndex(), mappedVariableName);
+						}
+					}
+				}
 
 				// Create mapped name and record into mappings.
 				String mappedMethodName = generator.mapMethod(owner, method);
@@ -188,7 +218,7 @@ public class MappingGenerator implements Service {
 				if (methodName.equals(mappedMethodName))
 					continue;
 
-				if (inheritableMethods.contains(method)) {
+				if (inheritableMethods.contains(key)) {
 					// Method is 'inheritable' meaning it needs to have a consistent name for the entire family.
 					// But if one of the members of the family is filtered, then we cannot map anything.
 					boolean shouldMapFamily = true;
@@ -246,5 +276,24 @@ public class MappingGenerator implements Service {
 	@Override
 	public MappingGeneratorConfig getServiceConfig() {
 		return config;
+	}
+
+	/**
+	 * Local record to use as set entries that are simpler than {@link ClassMember} implementations.
+	 * <p/>
+	 * Most importantly the {@link Object#hashCode()} of this type is based only on the name and descriptor.
+	 * This ensures additional data like local variable or generic signature data doesn't interfere with operations
+	 * such as {@link #generateFamilyMappings(MappingsAdapter, Set, NameGenerator, NameGeneratorFilter)}.
+	 *
+	 * @param name
+	 * 		Field/method name.
+	 * @param descriptor
+	 * 		Field/method descriptor.
+	 */
+	private record MemberKey(@Nonnull String name, @Nonnull String descriptor) {
+		@Nonnull
+		static MemberKey of(@Nonnull ClassMember member) {
+			return new MemberKey(member.getName(), member.getDescriptor());
+		}
 	}
 }

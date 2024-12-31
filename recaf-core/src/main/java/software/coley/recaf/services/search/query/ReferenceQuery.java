@@ -71,8 +71,8 @@ public class ReferenceQuery implements JvmClassQuery {
 	 *        {@code null} to ignore matching against reference owner descriptors.
 	 */
 	public ReferenceQuery(@Nullable StringPredicate ownerPredicate,
-						  @Nullable StringPredicate namePredicate,
-						  @Nullable StringPredicate descriptorPredicate) {
+	                      @Nullable StringPredicate namePredicate,
+	                      @Nullable StringPredicate descriptorPredicate) {
 		this.ownerPredicate = ownerPredicate;
 		this.namePredicate = namePredicate;
 		this.descriptorPredicate = descriptorPredicate;
@@ -138,8 +138,8 @@ public class ReferenceQuery implements JvmClassQuery {
 		private final JvmClassInfo classInfo;
 
 		public AsmReferenceClassVisitor(@Nonnull ResultSink resultSink,
-										@Nonnull ClassPathNode classPath,
-										@Nonnull JvmClassInfo classInfo) {
+		                                @Nonnull ClassPathNode classPath,
+		                                @Nonnull JvmClassInfo classInfo) {
 			super(RecafConstants.getAsmVersion());
 			this.resultSink = resultSink;
 			this.classPath = classPath;
@@ -210,9 +210,9 @@ public class ReferenceQuery implements JvmClassQuery {
 
 
 		public AsmReferenceMethodVisitor(@Nullable MethodVisitor delegate,
-										 @Nonnull MethodMember methodMember,
-										 @Nonnull ResultSink resultSink,
-										 @Nonnull ClassPathNode classLocation) {
+		                                 @Nonnull MethodMember methodMember,
+		                                 @Nonnull ResultSink resultSink,
+		                                 @Nonnull ClassPathNode classLocation) {
 			super(delegate);
 			this.resultSink = resultSink;
 			this.memberPath = classLocation.child(methodMember);
@@ -249,25 +249,18 @@ public class ReferenceQuery implements JvmClassQuery {
 		public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean isInterface) {
 			MethodInsnNode insn = new MethodInsnNode(opcode, owner, name, desc, isInterface);
 
-			// Check method ref
-			if (isMemberRefMatch(owner, name, desc))
-				resultSink.accept(memberPath.childInsn(insn, index), mref(owner, name, desc));
-
-			// Check types used in ref
-			Type methodType = Type.getMethodType(desc);
-			String methodRetType = methodType.getReturnType().getInternalName();
-			if (isClassRefMatch(methodRetType))
-				resultSink.accept(memberPath.childInsn(insn, index), cref(methodRetType));
-			for (Type argumentType : methodType.getArgumentTypes()) {
-				if (isClassRefMatch(argumentType.getInternalName()))
-					resultSink.accept(memberPath.childInsn(insn, index), cref(argumentType.getInternalName()));
-			}
+			visitMethodLikeInsn(owner, name, desc, insn);
 
 			super.visitMethodInsn(opcode, owner, name, desc, isInterface);
 		}
 
 		@Override
 		public void visitInvokeDynamicInsn(String name, String desc, Handle bsmHandle, Object... bsmArgs) {
+			InvokeDynamicInsnNode insn = new InvokeDynamicInsnNode(name, desc, bsmHandle, bsmArgs);
+
+			visitMethodLikeInsn(ownerType, name, desc, insn);
+			visitBsm(bsmHandle, bsmArgs, insn);
+
 			super.visitInvokeDynamicInsn(name, desc, bsmHandle, bsmArgs);
 		}
 
@@ -275,28 +268,8 @@ public class ReferenceQuery implements JvmClassQuery {
 		public void visitLdcInsn(Object value) {
 			LdcInsnNode insn = new LdcInsnNode(value);
 
-			if (value instanceof Handle handle) {
-				// Check handle ref
-				if (isMemberRefMatch(handle.getOwner(), handle.getName(), handle.getDesc())) {
-					resultSink.accept(memberPath.childInsn(insn, index),
-							mref(handle.getOwner(), handle.getName(), handle.getDesc()));
-				}
+			visitArg(insn.cst, insn);
 
-				// Check types used in ref
-				Type methodType = Type.getMethodType(handle.getDesc());
-				String methodRetType = methodType.getReturnType().getInternalName();
-				if (isClassRefMatch(methodRetType))
-					resultSink.accept(memberPath.childInsn(insn, index), cref(methodRetType));
-				for (Type argumentType : methodType.getArgumentTypes()) {
-					if (isClassRefMatch(argumentType.getInternalName()))
-						resultSink.accept(memberPath.childInsn(insn, index), cref(argumentType.getInternalName()));
-				}
-			} else if (value instanceof Type) {
-				String type = ((Type) value).getInternalName();
-				if (isClassRefMatch(type)) {
-					resultSink.accept(memberPath.childInsn(insn, index), cref(type));
-				}
-			}
 			super.visitLdcInsn(value);
 		}
 
@@ -413,6 +386,71 @@ public class ReferenceQuery implements JvmClassQuery {
 			AnnotationVisitor av = super.visitLocalVariableAnnotation(typeRef, typePath, start, end, index, desc, visible);
 			return new AnnotationReferenceVisitor(av, visible, resultSink, memberPath);
 		}
+
+		private void visitBsm(@Nonnull Handle bsmHandle, @Nonnull Object[] bsmArgs, @Nonnull AbstractInsnNode insn) {
+			// Visit the handle
+			visitHandle(bsmHandle, insn);
+
+			// Then all the args
+			for (Object bsmArg : bsmArgs)
+				visitArg(bsmArg, insn);
+		}
+
+		private void visitArg(@Nonnull Object arg, @Nonnull AbstractInsnNode insn) {
+			switch (arg) {
+				case Type typeArg -> visitType(typeArg, insn);
+				case Handle handleArg -> visitHandle(handleArg, insn);
+				case ConstantDynamic dynamicArg -> {
+					int argCount = dynamicArg.getBootstrapMethodArgumentCount();
+					Object[] args = new Object[argCount];
+					for (int i = 0; i < argCount; i++)
+						args[i] = dynamicArg.getBootstrapMethodArgument(i);
+					visitBsm(dynamicArg.getBootstrapMethod(), args, insn);
+				}
+				default -> {
+					// no-op
+				}
+			}
+		}
+
+		private void visitHandle(@Nonnull Handle handle, @Nonnull AbstractInsnNode insn) {
+			// Check handle ref
+			String handleDesc = handle.getDesc();
+			if (isMemberRefMatch(handle.getOwner(), handle.getName(), handleDesc)) {
+				resultSink.accept(memberPath.childInsn(insn, index),
+						mref(handle.getOwner(), handle.getName(), handleDesc));
+			}
+
+			// Check types used in ref
+			visitType(Type.getType(handle.getDesc()), insn);
+		}
+
+		private void visitMethodLikeInsn(@Nonnull String owner, @Nonnull String name, @Nonnull String desc, @Nonnull AbstractInsnNode insn) {
+			// Check method ref
+			if (isMemberRefMatch(owner, name, desc))
+				resultSink.accept(memberPath.childInsn(insn, index), mref(owner, name, desc));
+
+			// Check types used in ref
+			Type methodType = Type.getMethodType(desc);
+			visitType(methodType, insn);
+		}
+
+		private void visitType(@Nonnull Type type, @Nonnull AbstractInsnNode insn) {
+			if (type.getSort() == Type.METHOD) {
+				String methodRetType = type.getReturnType().getInternalName();
+				if (isClassRefMatch(methodRetType))
+					resultSink.accept(memberPath.childInsn(insn, index), cref(methodRetType));
+				for (Type argumentType : type.getArgumentTypes()) {
+					if (isClassRefMatch(argumentType.getInternalName()))
+						resultSink.accept(memberPath.childInsn(insn, index), cref(argumentType.getInternalName()));
+				}
+			} else {
+				String internalName = type.getInternalName();
+				if (isClassRefMatch(internalName)) {
+					resultSink.accept(memberPath.childInsn(insn, index), cref(internalName));
+				}
+			}
+		}
 	}
 
 	/**
@@ -423,8 +461,8 @@ public class ReferenceQuery implements JvmClassQuery {
 		private final ClassMemberPathNode memberPath;
 
 		public AsmReferenceFieldVisitor(@Nullable FieldVisitor delegate,
-										@Nonnull ResultSink resultSink,
-										@Nonnull ClassMemberPathNode memberPath) {
+		                                @Nonnull ResultSink resultSink,
+		                                @Nonnull ClassMemberPathNode memberPath) {
 			super(RecafConstants.getAsmVersion(), delegate);
 			this.resultSink = resultSink;
 			this.memberPath = memberPath;
@@ -462,9 +500,9 @@ public class ReferenceQuery implements JvmClassQuery {
 		private final boolean visible;
 
 		public AnnotationReferenceVisitor(@Nullable AnnotationVisitor delegate,
-										  boolean visible,
-										  @Nonnull ResultSink resultSink,
-										  @Nonnull PathNode<?> currentAnnoLocation) {
+		                                  boolean visible,
+		                                  @Nonnull ResultSink resultSink,
+		                                  @Nonnull PathNode<?> currentAnnoLocation) {
 			super(RecafConstants.getAsmVersion(), delegate);
 			this.visible = visible;
 			this.resultSink = resultSink;

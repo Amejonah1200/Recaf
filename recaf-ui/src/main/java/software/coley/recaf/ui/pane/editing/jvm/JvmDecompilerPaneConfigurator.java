@@ -88,6 +88,11 @@ public class JvmDecompilerPaneConfigurator extends AbstractDecompilerPaneConfigu
 
 	private class JavacVersionComboBox extends ComboBox<Integer> {
 		private JavacVersionComboBox() {
+			// TODO: Changing the value in this box causes the UI thread to 'sometimes' freeze the UI
+			//  - Nothing in the stacktrace from Recaf, so probably some weird event-loop
+			//  - No idea why this would trigger that though
+			//  - Does not occur if the valueProperty listener is commented out
+
 			int max = JavaVersion.get();
 			for (int i = JavacCompiler.getMinTargetVersion(); i <= max; i++)
 				getItems().add(i);
@@ -101,6 +106,11 @@ public class JvmDecompilerPaneConfigurator extends AbstractDecompilerPaneConfigu
 					return Lang.get("java.targetversion.auto");
 				return String.valueOf(v);
 			}));
+
+			// Hack to prevent odd resize-based deadlock: #798
+			int w = 200;
+			setMaxWidth(w);
+			setPrefWidth(w);
 
 			// Update property.
 			valueProperty().addListener((ob, old, cur) -> javacTarget.setValue(cur));
@@ -122,6 +132,11 @@ public class JvmDecompilerPaneConfigurator extends AbstractDecompilerPaneConfigu
 					return Lang.get("java.targetdownsampleversion.disabled");
 				return String.valueOf(v);
 			}));
+
+			// Hack to prevent odd resize-based deadlock: #798
+			int w = 200;
+			setMaxWidth(w);
+			setPrefWidth(w);
 
 			// Update property.
 			valueProperty().addListener((ob, old, cur) -> javacDownsampleTarget.setValue(cur));

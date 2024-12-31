@@ -1,56 +1,60 @@
 package software.coley.recaf.services.assembler;
 
+import dev.xdark.blw.type.MethodType;
 import dev.xdark.blw.type.Types;
-import dev.xdark.blw.type.*;
 import jakarta.annotation.Nonnull;
-import jakarta.annotation.Nullable;
+import jakarta.enterprise.context.Dependent;
 import jakarta.inject.Inject;
 import me.darknet.assembler.printer.JvmClassPrinter;
 import me.darknet.assembler.printer.JvmMethodPrinter;
 import me.darknet.assembler.printer.PrintContext;
 import org.objectweb.asm.Opcodes;
-import regexodus.Matcher;
+import org.slf4j.Logger;
 import regexodus.Pattern;
-import software.coley.recaf.cdi.WorkspaceScoped;
+import software.coley.recaf.analytics.logging.Logging;
+import software.coley.recaf.info.InnerClassInfo;
 import software.coley.recaf.info.JvmClassInfo;
-import software.coley.recaf.info.member.BasicLocalVariable;
 import software.coley.recaf.info.member.FieldMember;
 import software.coley.recaf.info.member.LocalVariable;
 import software.coley.recaf.info.member.MethodMember;
-import software.coley.recaf.path.ClassPathNode;
 import software.coley.recaf.services.compile.CompilerDiagnostic;
 import software.coley.recaf.services.compile.CompilerResult;
 import software.coley.recaf.services.compile.JavacArguments;
 import software.coley.recaf.services.compile.JavacCompiler;
-import software.coley.recaf.util.*;
+import software.coley.recaf.services.compile.stub.ExpressionHostingClassStubGenerator;
+import software.coley.recaf.util.AccessFlag;
+import software.coley.recaf.util.JavaVersion;
+import software.coley.recaf.util.NumberUtil;
+import software.coley.recaf.util.RegexUtil;
+import software.coley.recaf.util.StringUtil;
 import software.coley.recaf.workspace.model.Workspace;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Compiles Java source expressions into JASM.
  *
  * @author Matt Coley
  */
-@WorkspaceScoped
+@Dependent
 public class ExpressionCompiler {
+	private static final Logger logger = Logging.get(ExpressionCompiler.class);
 	private static final Pattern IMPORT_EXTRACT_PATTERN = RegexUtil.pattern("^\\s*(import \\w.+;)");
-	private static final Pattern WORD_PATTERN = RegexUtil.pattern("\\w+");
-	private static final Pattern WORD_DOT_PATTERN = RegexUtil.pattern("[\\w.]+");
-	private static final String EXPR_MARKER = "/* EXPR_START */";
+	public static final String EXPR_MARKER = "/* EXPR_START */";
 	private final JavacCompiler javac;
 	private final Workspace workspace;
 	private final AssemblerPipelineGeneralConfig assemblerConfig;
-	private String className;
 	private int classAccess;
+	private String className;
 	private String superName;
 	private List<String> implementing;
 	private int versionTarget;
 	private List<FieldMember> fields;
 	private List<MethodMember> methods;
+	private List<InnerClassInfo> innerClasses;
 	private String methodName;
 	private MethodType methodType;
 	private int methodFlags;
@@ -58,7 +62,7 @@ public class ExpressionCompiler {
 
 	@Inject
 	public ExpressionCompiler(@Nonnull Workspace workspace, @Nonnull JavacCompiler javac,
-							  @Nonnull AssemblerPipelineGeneralConfig assemblerConfig) {
+	                          @Nonnull AssemblerPipelineGeneralConfig assemblerConfig) {
 		this.workspace = workspace;
 		this.javac = javac;
 		this.assemblerConfig = assemblerConfig;
@@ -76,6 +80,7 @@ public class ExpressionCompiler {
 		versionTarget = JavaVersion.get();
 		fields = Collections.emptyList();
 		methods = Collections.emptyList();
+		innerClasses = Collections.emptyList();
 		methodName = "generated";
 		methodType = Types.methodType("()V");
 		methodFlags = Opcodes.ACC_STATIC | Opcodes.ACC_BRIDGE; // Bridge used to denote default state.
@@ -90,17 +95,20 @@ public class ExpressionCompiler {
 	 * 		Class to pull info from.
 	 */
 	public void setClassContext(@Nonnull JvmClassInfo classInfo) {
-		className = classInfo.getName();
+		String type = classInfo.getName();
+		String superType = classInfo.getSuperName();
+		className = type;
 		classAccess = classInfo.getAccess();
 		versionTarget = NumberUtil.intClamp(classInfo.getVersion() - JvmClassInfo.BASE_VERSION, JavacCompiler.getMinTargetVersion(), JavaVersion.get());
 		superName = classInfo.getSuperName();
 		implementing = classInfo.getInterfaces();
 		fields = classInfo.getFields();
 		methods = classInfo.getMethods();
+		innerClasses = classInfo.getInnerClasses();
 
 		// We use bridge to denote that the default flags are set.
 		// When we assign a class, there may be non-static fields/methods the user will want to interact with.
-		// Thus, we should clear our flags from the default so they can do that.
+		// Thus, we should clear our flags from the default so that they can do that.
 		if (AccessFlag.isBridge(methodFlags))
 			methodFlags = 0;
 
@@ -117,19 +125,23 @@ public class ExpressionCompiler {
 	 * 		Method to pull info from.
 	 */
 	public void setMethodContext(@Nonnull MethodMember method) {
-		// Map edge cases for disallowed names.
-		String name = method.getName();
-		if (name.equals("<init>"))
-			name = "instance_ctor";
-		else if (name.equals("<clinit>"))
-			name = "static_ctor";
-		else if (!isSafeName(name))
-			name = "obfuscated_method";
-
-		methodName = name;
+		methodName = method.getName();
 		methodType = Types.methodType(method.getDescriptor());
 		methodFlags = method.getAccess();
 		methodVariables = method.getLocalVariables();
+	}
+
+	/**
+	 * Set the target version of Java.
+	 * <br>
+	 * Java 8 would pass 8.
+	 *
+	 * @param versionTarget
+	 * 		Java version target.
+	 * 		Range of supported values: [{@link JavacCompiler#getMinTargetVersion()} - {@link JavaVersion#get()}]
+	 */
+	public void setVersionTarget(int versionTarget) {
+		this.versionTarget = versionTarget;
 	}
 
 	/**
@@ -146,15 +158,18 @@ public class ExpressionCompiler {
 	@Nonnull
 	public ExpressionResult compile(@Nonnull String expression) {
 		// Generate source of a class to house the expression within
+		ExpressionHostingClassStubGenerator stubber;
 		String code;
 		try {
-			code = generateClass(expression);
+			stubber = new ExpressionHostingClassStubGenerator(workspace, classAccess, className, superName, implementing,
+					fields, methods, innerClasses, methodFlags, methodName, methodType, methodVariables, expression);
+			code = stubber.generate();
 		} catch (ExpressionCompileException ex) {
 			return new ExpressionResult(ex);
 		}
 
 		// Compile the generated class
-		JavacArguments arguments = new JavacArguments(className, code, null, versionTarget, -1, true, false, false);
+		JavacArguments arguments = new JavacArguments(className, code, null, Math.max(versionTarget, JavacCompiler.getMinTargetVersion()), -1, true, false, false);
 		CompilerResult result = javac.compile(arguments, workspace, null);
 		if (!result.wasSuccess()) {
 			Throwable exception = result.getException();
@@ -172,7 +187,7 @@ public class ExpressionCompiler {
 		try {
 			PrintContext<?> context = new PrintContext<>(assemblerConfig.getDisassemblyIndent().getValue());
 			JvmClassPrinter printer = new JvmClassPrinter(new ByteArrayInputStream(klass));
-			JvmMethodPrinter method = (JvmMethodPrinter) printer.method(methodName, methodDescriptorWithVariables());
+			JvmMethodPrinter method = (JvmMethodPrinter) printer.method(stubber.getAdaptedMethodName(), stubber.methodDescriptorWithVariables());
 			if (method == null)
 				return new ExpressionResult(new ExpressionCompileException("Target method was not in generated class"));
 			method.setLabelPrefix("g");
@@ -186,310 +201,6 @@ public class ExpressionCompiler {
 	}
 
 	/**
-	 * @param expression
-	 * 		Expression to compile.
-	 *
-	 * @return Generated class to pass to {@code javac} for full-class compilation.
-	 *
-	 * @throws ExpressionCompileException
-	 * 		When the class could not be fully generated.
-	 */
-	@Nonnull
-	private String generateClass(@Nonnull String expression) throws ExpressionCompileException {
-		StringBuilder code = new StringBuilder();
-
-		// Append package
-		if (className.indexOf('/') > 0) {
-			String packageName = className.replace('/', '.').substring(0, className.lastIndexOf('/'));
-			code.append("package ").append(packageName).append(";\n");
-		}
-
-		// Add imports from the user defined expression.
-		// Remove the imports from the expression once copied to the output code.
-		StringBuilder expressionBuffer = new StringBuilder();
-		expression.lines().forEach(l -> {
-			Matcher matcher = IMPORT_EXTRACT_PATTERN.matcher(l);
-			if (matcher.find()) {
-				code.append(matcher.group(1)).append('\n');
-			} else {
-				expressionBuffer.append(l).append('\n');
-			}
-		});
-		expression = expressionBuffer.toString();
-
-		// Class structure
-		boolean isEnum = AccessFlag.isEnum(classAccess);
-		code.append(isEnum ? "enum " : "abstract class ").append(StringUtil.shortenPath(className));
-		if (superName != null && !superName.equals("java/lang/Object") && !superName.equals("java/lang/Enum"))
-			code.append(" extends ").append(superName.replace('/', '.'));
-		if (implementing != null && !implementing.isEmpty())
-			code.append(" implements ").append(implementing.stream().map(s -> s.replace('/', '.')).collect(Collectors.joining(", "))).append(' ');
-		code.append("{\n");
-
-		// Enum constants must come first if the class is an enum
-		if (isEnum) {
-			int enumConsts = 0;
-			for (FieldMember field : fields) {
-				if (field.getDescriptor().length() == 1)
-					continue;
-				InstanceType fieldDesc = Types.instanceTypeFromDescriptor(field.getDescriptor());
-				if (fieldDesc.internalName().equals(className) && field.hasFinalModifier() && field.hasStaticModifier()) {
-					if (enumConsts > 0)
-						code.append(", ");
-					code.append(field.getName());
-					enumConsts++;
-				}
-			}
-			code.append(';');
-		}
-
-		// Method structure to house the expression
-		int parameterVarIndex = 0;
-		if (AccessFlag.isPublic(methodFlags))
-			code.append("public ");
-		else if (AccessFlag.isProtected(methodFlags))
-			code.append("protected ");
-		else if (AccessFlag.isPrivate(methodFlags))
-			code.append("private ");
-		if (AccessFlag.isStatic(methodFlags))
-			code.append("static ");
-		else
-			parameterVarIndex++;
-		ClassType returnType = methodType.returnType();
-		if (returnType instanceof PrimitiveType primitiveReturn) {
-			code.append(primitiveReturn.name()).append(' ');
-		} else if (returnType instanceof InstanceType instanceType) {
-			code.append(instanceType.internalName().replace('/', '.')).append(' ');
-		} else if (returnType instanceof ArrayType arrayReturn) {
-			ClassType componentReturnType = arrayReturn.componentType();
-			if (componentReturnType instanceof PrimitiveType primitiveReturn) {
-				code.append(primitiveReturn.name());
-			} else if (componentReturnType instanceof InstanceType instanceType) {
-				code.append(instanceType.internalName().replace('/', '.'));
-			}
-			code.append("[]".repeat(arrayReturn.dimensions()));
-		}
-		code.append(' ').append(methodName).append('(');
-		int parameterCount = methodType.parameterTypes().size();
-		Set<String> usedVariables = new HashSet<>();
-		for (int i = 0; i < parameterCount; i++) {
-			LocalVariable parameterVariable = getParameterVariable(parameterVarIndex, i);
-			String parameterName = parameterVariable.getName();
-			usedVariables.add(parameterName);
-			NameType varInfo = getInfo(parameterName, parameterVariable.getDescriptor());
-			parameterVarIndex += varInfo.size;
-			code.append(varInfo.className).append(' ').append(varInfo.name);
-			if (i < parameterCount - 1) code.append(", ");
-
-		}
-		for (LocalVariable variable : methodVariables) {
-			String name = variable.getName();
-			if (!isSafeName(name) || name.equals("this"))
-				continue;
-			boolean hasPriorParameters = !usedVariables.isEmpty();
-			if (!usedVariables.add(name))
-				continue;
-			NameType varInfo = getInfo(name, variable.getDescriptor());
-			if (hasPriorParameters)
-				code.append(", ");
-			code.append(varInfo.className).append(' ').append(varInfo.name);
-		}
-		code.append(") throws Throwable { " + EXPR_MARKER + " \n");
-		code.append(expression);
-		code.append("}\n");
-
-		// Stub out fields / methods
-		for (FieldMember field : fields) {
-			// Skip stubbing of illegally named fields.
-			String name = field.getName();
-			if (!isSafeName(name))
-				continue;
-			NameType fieldInfo = getInfo(name, field.getDescriptor());
-			if (!isSafeClassName(fieldInfo.className))
-				continue;
-
-			// Skip enum constants, we added those earlier.
-			if (fieldInfo.className.equals(className.replace('/', '.')) && field.hasFinalModifier() && field.hasStaticModifier())
-				continue;
-
-			if (field.hasStaticModifier())
-				code.append("static ");
-			code.append(fieldInfo.className).append(' ').append(fieldInfo.name).append(";\n");
-		}
-		for (MethodMember method : methods) {
-			// Skip stubbing of illegally named methods.
-			String name = method.getName();
-			boolean isCtor = false;
-			if (name.equals("<init>")) {
-				if (isEnum) // Skip constructors for enum classes since we always drop enum const parameters.
-					continue;
-				isCtor = true;
-			} else if (!isSafeName(name))
-				continue;
-
-			// Skip stubbing the method if it is the one we're assembling the expression within.
-			String descriptor = method.getDescriptor();
-			MethodType localMethodType = Types.methodType(descriptor);
-			if (methodName.equals(name) && methodType.equals(localMethodType))
-				continue;
-
-			// Skip enum's 'valueOf'
-			if (isEnum &&
-					name.equals("valueOf") &&
-					descriptor.equals("(Ljava/lang/String;)L" + className + ";"))
-				continue;
-
-			// Skip stubbing of methods with bad return types / bad parameter types.
-			NameType returnInfo = getInfo(name, localMethodType.returnType().descriptor());
-			if (!isSafeClassName(returnInfo.className))
-				continue;
-			if (!localMethodType.parameterTypes().stream().map(p -> {
-				try {
-					return getInfo("p", p.descriptor()).className();
-				} catch (Throwable t) {
-					return "\0"; // Bogus which will throw off the safe name check.
-				}
-			}).allMatch(ExpressionCompiler::isSafeClassName))
-				continue;
-
-			// Stub the method
-			if (method.hasPublicModifier())
-				code.append("public ");
-			else if (method.hasProtectedModifier())
-				code.append("protected ");
-			else if (method.hasPrivateModifier())
-				code.append("private ");
-			if (method.hasStaticModifier())
-				code.append("static ");
-
-			if (isCtor)
-				code.append(StringUtil.shortenPath(className)).append('(');
-			else
-				code.append(returnInfo.className).append(' ').append(returnInfo.name).append('(');
-			List<ClassType> methodParameterTypes = localMethodType.parameterTypes();
-			parameterCount = methodParameterTypes.size();
-			for (int i = 0; i < parameterCount; i++) {
-				ClassType paramType = methodParameterTypes.get(i);
-				NameType paramInfo = getInfo("p" + i, paramType.descriptor());
-				code.append(paramInfo.className).append(' ').append(paramInfo.name);
-				if (i < parameterCount - 1) code.append(", ");
-			}
-			code.append(") { ");
-			if (isCtor) {
-				// If we know the parent type, we need to properly implement the constructor.
-				// If we don't know the parent type, we cannot generate a valid constructor.
-				ClassPathNode superPath = superName == null ? null : workspace.findJvmClass(superName);
-				if (superPath == null && superName != null)
-					throw new ExpressionCompileException("Cannot generate 'super(...)' for constructor, " +
-							"missing type information for: " + superName);
-				if (superPath != null) {
-					// To make it easy, we'll find the simplest constructor in the parent class and pass dummy values.
-					MethodType parentConstructor = superPath.getValue().methodStream()
-							.filter(m -> m.getName().equals("<init>"))
-							.map(m -> Types.methodType(m.getDescriptor()))
-							.min(Comparator.comparingInt(a -> a.parameterTypes().size()))
-							.orElse(null);
-					if (parentConstructor != null) {
-						code.append("super(");
-						parameterCount = parentConstructor.parameterTypes().size();
-						for (int i = 0; i < parameterCount; i++) {
-							ClassType type = parentConstructor.parameterTypes().get(i);
-							if (type instanceof ObjectType) {
-								code.append("null");
-							} else {
-								char prim = type.descriptor().charAt(0);
-								if (prim == 'Z')
-									code.append("false");
-								else
-									code.append('0');
-							}
-							if (i < parameterCount - 1) code.append(", ");
-						}
-						code.append(");");
-					}
-				}
-			} else {
-				code.append("throw new RuntimeException();");
-			}
-			code.append(" }\n");
-		}
-
-		// Done with the class
-		code.append("}\n");
-		return code.toString();
-	}
-
-	/**
-	 * @param name
-	 * 		Variable name.
-	 * @param descriptor
-	 * 		Variable descriptor.
-	 *
-	 * @return Variable info wrapper.
-	 *
-	 * @throws ExpressionCompileException
-	 * 		When the variable descriptor is malformed.
-	 */
-	@Nonnull
-	private NameType getInfo(@Nonnull String name, @Nonnull String descriptor) throws ExpressionCompileException {
-		int size;
-		String className;
-		if (Types.isPrimitive(descriptor)) {
-			PrimitiveType primitiveType = Types.primitiveFromDesc(descriptor);
-			size = Types.category(primitiveType);
-			className = primitiveType.name();
-		} else if (descriptor.charAt(0) == '[') {
-			ArrayType arrayParameterType = Types.arrayTypeFromDescriptor(descriptor);
-			ClassType componentReturnType = arrayParameterType.componentType();
-			if (componentReturnType instanceof PrimitiveType primitiveParameter) {
-				className = primitiveParameter.name();
-			} else if (componentReturnType instanceof InstanceType instanceType) {
-				className = instanceType.internalName().replace('/', '.');
-			} else {
-				throw new ExpressionCompileException("Illegal component type: " + componentReturnType);
-			}
-			className += "[]".repeat(arrayParameterType.dimensions());
-			size = 1;
-		} else {
-			size = 1;
-			className = Types.instanceTypeFromDescriptor(descriptor).internalName().replace('/', '.');
-		}
-		return new NameType(size, name, className);
-	}
-
-	/**
-	 * @param index
-	 * 		Local variable index.
-	 *
-	 * @return Variable entry from the target method, or {@code null} if not known.
-	 */
-	@Nullable
-	private LocalVariable findVar(int index) {
-		if (methodVariables == null) return null;
-		return methodVariables.stream()
-				.filter(l -> l.getIndex() == index)
-				.findFirst().orElse(null);
-	}
-
-	/**
-	 * @param parameterVarIndex
-	 * 		Local variable index of the parameter.
-	 * @param parameterIndex
-	 * 		Parameter index.
-	 *
-	 * @return Local variable info of the parameter.
-	 */
-	@Nonnull
-	private LocalVariable getParameterVariable(int parameterVarIndex, int parameterIndex) {
-		LocalVariable parameterVariable = findVar(parameterVarIndex);
-		if (parameterVariable == null) {
-			ClassType parameterType = methodType.parameterTypes().get(parameterIndex);
-			parameterVariable = new BasicLocalVariable(parameterVarIndex, "p" + parameterIndex, parameterType.descriptor(), null);
-		}
-		return parameterVariable;
-	}
-
-	/**
 	 * @param code
 	 * 		Generateed code to work with.
 	 * @param diagnostics
@@ -499,77 +210,20 @@ public class ExpressionCompiler {
 	 */
 	@Nonnull
 	private static List<CompilerDiagnostic> remap(@Nonnull String code, @Nonnull List<CompilerDiagnostic> diagnostics) {
+		// Given the following example code:
+		//
+		// 1:  package foo;
+		// 2:  class Foo extends Bar {
+		// 3:  void method() { /* EXPR_START */
+		// 4:    // Code here
+		//
+		// The expression marker is on line 3, and our code starts on line four. So the reported line numbers need to
+		// be shifted down by three. There are two line breaks between the start and the marker, so we add plus one
+		// to consider the line the marker is itself on.
 		int exprStart = code.indexOf(EXPR_MARKER);
-		int lineOffset = StringUtil.count('\n', code.substring(0, exprStart));
+		int lineOffset = StringUtil.count('\n', code.substring(0, exprStart)) + 1;
 		return diagnostics.stream()
 				.map(d -> d.withLine(d.line() - lineOffset))
 				.toList();
-	}
-
-	/**
-	 * <b>Note</b>: The logic for appending parameters to the desc within this method must align with {@link #generateClass(String)}.
-	 *
-	 * @return The method descriptor with additional parameters from the {@link #methodVariables} appended at the end.
-	 *
-	 * @throws ExpressionCompileException
-	 * 		When parameter variable information cannot be found.
-	 */
-	@Nonnull
-	private String methodDescriptorWithVariables() throws ExpressionCompileException {
-		StringBuilder sb = new StringBuilder("(");
-		int parameterVarIndex = AccessFlag.isStatic(methodFlags) ? 0 : 1;
-		int parameterCount = methodType.parameterTypes().size();
-		Set<String> usedVariables = new HashSet<>();
-		for (int i = 0; i < parameterCount; i++) {
-			LocalVariable parameterVariable = getParameterVariable(parameterVarIndex, i);
-			String parameterName = parameterVariable.getName();
-			usedVariables.add(parameterName);
-			NameType varInfo = getInfo(parameterName, parameterVariable.getDescriptor());
-			parameterVarIndex += varInfo.size;
-			sb.append(parameterVariable.getDescriptor());
-		}
-		for (LocalVariable variable : methodVariables) {
-			String name = variable.getName();
-			if (!isSafeName(name) || name.equals("this"))
-				continue;
-			if (!usedVariables.add(name))
-				continue;
-			sb.append(variable.getDescriptor());
-		}
-		sb.append(')').append(methodType.returnType().descriptor());
-		return sb.toString();
-	}
-
-	/**
-	 * @param name
-	 * 		Name to check.
-	 *
-	 * @return {@code true} when it can be used as a variable name safely.
-	 */
-	private static boolean isSafeName(@Nonnull String name) {
-		return WORD_PATTERN.matches(name);
-	}
-
-	/**
-	 * @param name
-	 * 		Name to check.
-	 *
-	 * @return {@code true} when it can be used as a class name safely.
-	 */
-	private static boolean isSafeClassName(@Nonnull String name) {
-		return WORD_DOT_PATTERN.matches(name);
-	}
-
-	/**
-	 * Wrapper for field/variable info.
-	 *
-	 * @param size
-	 * 		Variable slot size.
-	 * @param name
-	 * 		Variable name.
-	 * @param className
-	 * 		Variable class type name.
-	 */
-	private record NameType(int size, @Nonnull String name, @Nonnull String className) {
 	}
 }

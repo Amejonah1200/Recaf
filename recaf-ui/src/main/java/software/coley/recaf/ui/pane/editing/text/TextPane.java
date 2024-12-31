@@ -8,22 +8,20 @@ import software.coley.recaf.info.FileInfo;
 import software.coley.recaf.info.TextFileInfo;
 import software.coley.recaf.path.FilePathNode;
 import software.coley.recaf.path.PathNode;
+import software.coley.recaf.services.info.association.FileTypeSyntaxAssociationService;
 import software.coley.recaf.services.navigation.FileNavigable;
 import software.coley.recaf.services.navigation.Navigable;
 import software.coley.recaf.services.navigation.UpdatableNavigable;
-import software.coley.recaf.services.info.association.FileTypeAssociationService;
 import software.coley.recaf.ui.config.KeybindingConfig;
 import software.coley.recaf.ui.control.richtext.Editor;
 import software.coley.recaf.ui.control.richtext.bracket.BracketMatchGraphicFactory;
 import software.coley.recaf.ui.control.richtext.bracket.SelectedBracketTracking;
-import software.coley.recaf.ui.control.richtext.problem.ProblemGraphicFactory;
 import software.coley.recaf.ui.control.richtext.search.SearchBar;
 import software.coley.recaf.util.Animations;
 import software.coley.recaf.util.FxThreadUtil;
 import software.coley.recaf.util.threading.ThreadUtil;
 import software.coley.recaf.workspace.model.bundle.FileBundle;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -36,23 +34,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Dependent
 public class TextPane extends BorderPane implements FileNavigable, UpdatableNavigable {
 	protected final AtomicBoolean updateLock = new AtomicBoolean();
-	private final FileTypeAssociationService languageAssociation;
+	private final FileTypeSyntaxAssociationService languageAssociation;
 	protected final Editor editor;
 	protected FilePathNode path;
 
 	@Inject
-	public TextPane(@Nonnull FileTypeAssociationService languageAssociation,
-					@Nonnull KeybindingConfig keys,
-					@Nonnull SearchBar searchBar) {
+	public TextPane(@Nonnull FileTypeSyntaxAssociationService languageAssociation,
+	                @Nonnull KeybindingConfig keys,
+	                @Nonnull SearchBar searchBar) {
 		this.languageAssociation = languageAssociation;
 
 		// Configure the editor
 		editor = new Editor();
 		editor.setSelectedBracketTracking(new SelectedBracketTracking());
-		editor.getRootLineGraphicFactory().addLineGraphicFactories(
-				new BracketMatchGraphicFactory(),
-				new ProblemGraphicFactory()
-		);
+		editor.getRootLineGraphicFactory().addLineGraphicFactory(new BracketMatchGraphicFactory());
 		searchBar.install(editor);
 
 		// Setup keybindings
@@ -72,14 +67,14 @@ public class TextPane extends BorderPane implements FileNavigable, UpdatableNavi
 	 */
 	private void save() {
 		// Pull data from path.
-		FileInfo info = path.getValue();
+		TextFileInfo info = path.getValue().asTextFile();
 		FileBundle bundle = path.getValueOfType(FileBundle.class);
 		if (bundle == null)
 			throw new IllegalStateException("Bundle missing from file path node");
 
 		// Create updated info model.
-		FileInfo newInfo = info.toFileBuilder()
-				.withRawContent(editor.getText().getBytes(StandardCharsets.UTF_8))
+		FileInfo newInfo = info.toTextBuilder()
+				.withRawContent(editor.getText().getBytes(info.getCharset()))
 				.build();
 
 		// Update the file in the bundle.
@@ -105,6 +100,7 @@ public class TextPane extends BorderPane implements FileNavigable, UpdatableNavi
 	public void disable() {
 		setDisable(true);
 		setOnKeyPressed(null);
+		editor.close();
 	}
 
 	@Override
@@ -125,7 +121,12 @@ public class TextPane extends BorderPane implements FileNavigable, UpdatableNavi
 				languageAssociation.configureEditorSyntax(info, editor);
 
 				// Update the text.
-				FxThreadUtil.run(() -> editor.setText(textInfo.getText()));
+				FxThreadUtil.run(() -> {
+					editor.setText(textInfo.getText());
+
+					// Prevent undo from reverting to empty state.
+					editor.getCodeArea().getUndoManager().forgetHistory();
+				});
 			}
 		}
 	}

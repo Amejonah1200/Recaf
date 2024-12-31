@@ -45,11 +45,13 @@ public class ByteHeaderUtil {
 	// Programs
 	public static final int[] PE = {0x4D, 0x5A};
 	public static final int[] ELF = {0x7F, 0x45, 0x4C, 0x46};
+	public static final int[] ELF_AR = {0x21, 0x3C, 0x61, 0x72, 0x63, 0x68, 0x3E, 0x0A};
 	public static final int[] DYLIB_32 = {0xCE, 0xFA, 0xED, 0xFE};
 	public static final int[] DYLIB_64 = {0xCF, 0xFA, 0xED, 0xFE};
 	public static final List<int[]> PROGRAM_HEADERS = List.of(
 			PE,
 			ELF,
+			ELF_AR,
 			DYLIB_32,
 			DYLIB_64);
 	// Images
@@ -57,11 +59,13 @@ public class ByteHeaderUtil {
 	public static final int[] JPG = {0xFF, 0xD8, 0xFF};
 	public static final int[] GIF = {0x47, 0x49, 0x46, 0x38};
 	public static final int[] BMP = {0x42, 0x4D};
+	public static final int[] ICO = {0x00, 0x00, 0x01, 0x00};
 	public static final List<int[]> IMAGE_HEADERS = List.of(
 			PNG,
 			JPG,
 			GIF,
-			BMP);
+			BMP,
+			ICO);
 	// Audio
 	public static final int[] OGG = {0x4F, 0x67, 0x67, 0x53};
 	public static final int[] WAV = {0x52, 0x49, 0x46, 0x46, WILD, WILD, WILD, WILD, 0x57, 0x41, 0x56, 0x45};
@@ -88,6 +92,12 @@ public class ByteHeaderUtil {
 	// Android files (Modular chunk system, use unsigned short LE headers)
 	public static final int[] BINARY_XML = {0x03, 0x00};
 	public static final int[] ARSC = {0x02, 0x00};
+	// Text BOM
+	public static final int[] TEXT_BOM_UTF_32BE = {0x00, 0x00, 0xFE, 0xFF};
+	public static final int[] TEXT_BOM_UTF_32LE = {0xFF, 0xFE, 0x00, 0x00};
+	public static final int[] TEXT_BOM_UTF_16BE = {0xFE, 0xFF, WILD, WILD};
+	public static final int[] TEXT_BOM_UTF_16LE = {0xFF, 0xFE, WILD, WILD};
+	public static final int[] TEXT_BOM_UTF_8 = {0xEF, 0xBB, 0xBF, WILD};
 	// Misc
 	public static final int[] PDF = {0x25, 0x50, 0x44, 0x46, 0x2D};
 

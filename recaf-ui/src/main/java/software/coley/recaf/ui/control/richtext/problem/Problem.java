@@ -6,35 +6,25 @@ import software.coley.recaf.services.compile.CompilerDiagnostic;
 /**
  * Outline of a problem.
  *
+ * @param line
+ * 		Line the problem occurred on.
+ * @param column
+ * 		Column in the line the problem occurred on.
+ * 		May be negative if position information is not available.
+ * @param length
+ * 		Length beyond the column position where the message applies to.
+ * 		May be negative if position information is not available.
+ * @param level
+ * 		Problem level.
+ * @param phase
+ * 		Problem phase, stating at what point in the process the problem occurred.
+ * @param message
+ * 		Problem message.
+ *
  * @author Matt Coley
  */
-public class Problem implements Comparable<Problem> {
-	private final int line;
-	private final int column;
-	private final ProblemLevel level;
-	private final ProblemPhase phase;
-	private final String message;
-
-	/**
-	 * @param line
-	 * 		Line the problem occurred on.
-	 * @param column
-	 * 		Column in the line the problem occurred on.
-	 * 		May be negative if position information is not available.
-	 * @param level
-	 * 		Problem level.
-	 * @param phase
-	 * 		Problem phase, stating at what point in the process the problem occurred.
-	 * @param message
-	 * 		Problem message.
-	 */
-	public Problem(int line, int column, @Nonnull ProblemLevel level, @Nonnull ProblemPhase phase, @Nonnull String message) {
-		this.line = line;
-		this.column = column;
-		this.level = level;
-		this.phase = phase;
-		this.message = message;
-	}
+public record Problem(int line, int column, int length, ProblemLevel level, ProblemPhase phase,
+                      String message) implements Comparable<Problem> {
 
 	/**
 	 * @param diagnostic
@@ -49,7 +39,8 @@ public class Problem implements Comparable<Problem> {
 			case INFO -> ProblemLevel.INFO;
 			default -> ProblemLevel.ERROR;
 		};
-		return new Problem(diagnostic.line(), diagnostic.column(), level, ProblemPhase.BUILD, diagnostic.message());
+		return new Problem(diagnostic.line(), diagnostic.column(), diagnostic.length(),
+				level, ProblemPhase.BUILD, diagnostic.message());
 	}
 
 	/**
@@ -60,57 +51,7 @@ public class Problem implements Comparable<Problem> {
 	 */
 	@Nonnull
 	public Problem withLine(int newLine) {
-		return new Problem(newLine, column, level, phase, message);
-	}
-
-	/**
-	 * @param newColumn
-	 * 		New column for problem.
-	 *
-	 * @return Copy of the current problem, but with the column number modified.
-	 */
-	@Nonnull
-	public Problem withColumn(int newColumn) {
-		return new Problem(line, newColumn, level, phase, message);
-	}
-
-	/**
-	 * @return Line the problem occurred on.
-	 */
-	public int getLine() {
-		return line;
-	}
-
-	/**
-	 * @return Column in the line the problem occurred on.
-	 * May be negative if position information is not available.
-	 */
-	public int getColumn() {
-		return column;
-	}
-
-	/**
-	 * @return Problem level.
-	 */
-	@Nonnull
-	public ProblemLevel getLevel() {
-		return level;
-	}
-
-	/**
-	 * @return Problem phase, stating at what point in the process the problem occurred.
-	 */
-	@Nonnull
-	public ProblemPhase getPhase() {
-		return phase;
-	}
-
-	/**
-	 * @return Problem message.
-	 */
-	@Nonnull
-	public String getMessage() {
-		return message;
+		return new Problem(newLine, column, length, level, phase, message);
 	}
 
 	@Override
@@ -120,6 +61,11 @@ public class Problem implements Comparable<Problem> {
 
 	@Override
 	public int compareTo(Problem o) {
-		return Integer.compare(line, o.line);
+		int cmp = Integer.compare(line, o.line);
+		if (cmp == 0)
+			cmp = Integer.compare(column, o.column);
+		if (cmp == 0)
+			cmp = level.compareTo(o.level);
+		return cmp;
 	}
 }

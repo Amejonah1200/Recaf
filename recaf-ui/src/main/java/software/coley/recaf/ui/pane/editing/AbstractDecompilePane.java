@@ -34,7 +34,7 @@ import software.coley.recaf.services.decompile.DecompileResult;
 import software.coley.recaf.services.decompile.DecompilerManager;
 import software.coley.recaf.services.decompile.JvmDecompiler;
 import software.coley.recaf.services.decompile.NoopJvmDecompiler;
-import software.coley.recaf.services.info.association.FileTypeAssociationService;
+import software.coley.recaf.services.info.association.FileTypeSyntaxAssociationService;
 import software.coley.recaf.services.mapping.MappingResults;
 import software.coley.recaf.services.mapping.Mappings;
 import software.coley.recaf.services.navigation.ClassNavigable;
@@ -43,9 +43,7 @@ import software.coley.recaf.services.navigation.UpdatableNavigable;
 import software.coley.recaf.services.source.AstMappingVisitor;
 import software.coley.recaf.ui.control.BoundLabel;
 import software.coley.recaf.ui.control.richtext.Editor;
-import software.coley.recaf.ui.control.richtext.bracket.BracketMatchGraphicFactory;
 import software.coley.recaf.ui.control.richtext.bracket.SelectedBracketTracking;
-import software.coley.recaf.ui.control.richtext.problem.ProblemGraphicFactory;
 import software.coley.recaf.ui.control.richtext.problem.ProblemTracking;
 import software.coley.recaf.ui.control.richtext.search.SearchBar;
 import software.coley.recaf.ui.control.richtext.source.JavaContextActionSupport;
@@ -77,6 +75,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class AbstractDecompilePane extends BorderPane implements ClassNavigable, UpdatableNavigable {
 	private static final Logger logger = Logging.get(AbstractDecompilePane.class);
 	protected final ObservableObject<JvmDecompiler> decompiler = new ObservableObject<>(NoopJvmDecompiler.getInstance());
+	protected final ObservableBoolean decompileOutputErrored = new ObservableBoolean(false);
 	protected final ObservableBoolean decompileInProgress = new ObservableBoolean(false);
 	protected final AtomicBoolean updateLock = new AtomicBoolean();
 	protected final ProblemTracking problemTracking = new ProblemTracking();
@@ -87,10 +86,10 @@ public class AbstractDecompilePane extends BorderPane implements ClassNavigable,
 	protected ClassPathNode path;
 
 	protected AbstractDecompilePane(@Nonnull DecompilerPaneConfig config,
-									@Nonnull SearchBar searchBar,
-									@Nonnull JavaContextActionSupport contextActionSupport,
-									@Nonnull FileTypeAssociationService languageAssociation,
-									@Nonnull DecompilerManager decompilerManager) {
+	                                @Nonnull SearchBar searchBar,
+	                                @Nonnull JavaContextActionSupport contextActionSupport,
+	                                @Nonnull FileTypeSyntaxAssociationService languageAssociation,
+	                                @Nonnull DecompilerManager decompilerManager) {
 		this.config = config;
 		this.contextActionSupport = contextActionSupport;
 		this.decompilerManager = decompilerManager;
@@ -102,10 +101,7 @@ public class AbstractDecompilePane extends BorderPane implements ClassNavigable,
 		languageAssociation.configureEditorSyntax("java", editor);
 		editor.setSelectedBracketTracking(new SelectedBracketTracking());
 		editor.setProblemTracking(problemTracking);
-		editor.getRootLineGraphicFactory().addLineGraphicFactories(
-				new BracketMatchGraphicFactory(),
-				new ProblemGraphicFactory()
-		);
+		editor.getRootLineGraphicFactory().addDefaultCodeGraphicFactories();
 		contextActionSupport.install(editor);
 		searchBar.install(editor);
 
@@ -148,6 +144,8 @@ public class AbstractDecompilePane extends BorderPane implements ClassNavigable,
 	public void disable() {
 		setDisable(true);
 		setOnKeyPressed(null);
+		editor.close();
+		contextActionSupport.close();
 	}
 
 	@Override
@@ -176,6 +174,24 @@ public class AbstractDecompilePane extends BorderPane implements ClassNavigable,
 			if (!config.getUseMappingAcceleration().getValue() || !handleRemapUpdate(classInfo))
 				decompile();
 		}
+	}
+
+	/**
+	 * Associates the given {@link ToolsContainerComponent} with this decompile pane's {@link #editor}.
+	 *
+	 * @param toolsContainer
+	 * 		Tool container to install.
+	 */
+	protected void installToolsContainer(@Nonnull ToolsContainerComponent toolsContainer) {
+		DecompileFailureButton failureButton = new DecompileFailureButton();
+		decompileOutputErrored.addChangeListener((ob, old, cur) -> {
+			failureButton.setVisible(cur);
+			if (cur) failureButton.animate();
+		});
+
+		toolsContainer.install(editor);
+		toolsContainer.add(contextActionSupport.getAvailabilityButton());
+		toolsContainer.addLast(failureButton);
 	}
 
 	/**
@@ -270,7 +286,9 @@ public class AbstractDecompilePane extends BorderPane implements ClassNavigable,
 					String text = result.getText();
 					if (Objects.equals(text, editor.getText()))
 						return; // Skip if existing text is the same
-					switch (result.getType()) {
+					DecompileResult.ResultType resultType = result.getType();
+					decompileOutputErrored.setValue(resultType == DecompileResult.ResultType.FAILURE);
+					switch (resultType) {
 						case SUCCESS -> editor.setText(text);
 						case SKIPPED -> editor.setText(text == null ? "// Decompilation skipped" : text);
 						case FAILURE -> {
@@ -278,8 +296,9 @@ public class AbstractDecompilePane extends BorderPane implements ClassNavigable,
 							if (exception != null) {
 								String trace = StringUtil.traceToString(exception);
 								editor.setText("/*\nDecompile failed:\n" + trace + "\n*/");
-							} else
+							} else {
 								editor.setText("/*\nDecompile failed, but no trace was attached.\n*/");
+							}
 						}
 					}
 
@@ -348,7 +367,7 @@ public class AbstractDecompilePane extends BorderPane implements ClassNavigable,
 			}, FxThreadUtil.executor());
 		}
 
-		private class BytecodeTransition extends Transition {
+		private static class BytecodeTransition extends Transition {
 			private final Labeled labeled;
 			private byte[] bytecode;
 

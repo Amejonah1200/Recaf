@@ -18,6 +18,7 @@ import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.Tooltip;
 import javafx.scene.effect.BoxBlur;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
@@ -35,6 +36,7 @@ import software.coley.recaf.ui.control.richtext.problem.ProblemInvalidationListe
 import software.coley.recaf.ui.control.richtext.problem.ProblemLevel;
 import software.coley.recaf.ui.control.richtext.problem.ProblemTracking;
 import software.coley.recaf.util.FxThreadUtil;
+import software.coley.recaf.util.Lang;
 import software.coley.recaf.util.PlatformType;
 
 import java.util.Collection;
@@ -64,7 +66,7 @@ public class ProblemOverlay extends Group implements EditorComponent, ProblemInv
 			if (problemTracking == null) return;
 
 			// Skip if no problems
-			Collection<Problem> problems = problemTracking.getProblems().values();
+			Collection<Problem> problems = problemTracking.getAllProblems();
 			if (problems.isEmpty()) return;
 
 			// Create vertical list
@@ -72,23 +74,28 @@ public class ProblemOverlay extends Group implements EditorComponent, ProblemInv
 			ObservableList<Node> children = content.getChildren();
 			for (Problem problem : problems) {
 				// Map level to graphic
-				ProblemLevel level = problem.getLevel();
+				ProblemLevel level = problem.level();
+				Color levelColor = switch (level) {
+					case ERROR -> Color.RED;
+					case WARN -> Color.YELLOW;
+					default -> Color.TURQUOISE;
+				};
 				Node graphic = switch (level) {
-					case ERROR -> new FontIconView(CarbonIcons.ERROR, Color.RED);
-					case WARN -> new FontIconView(CarbonIcons.WARNING_ALT, Color.YELLOW);
-					default -> new FontIconView(CarbonIcons.INFORMATION, Color.TURQUOISE);
+					case ERROR -> new FontIconView(CarbonIcons.ERROR, levelColor);
+					case WARN -> new FontIconView(CarbonIcons.WARNING_ALT, levelColor);
+					default -> new FontIconView(CarbonIcons.INFORMATION, levelColor);
 				};
 
 				// Create 'N: Message' layout
 				//  - Exclude line number 'N' when line number is negative
-				Label messageLabel = new Label(problem.getMessage());
-				messageLabel.setTextFill(Color.RED);
+				Label messageLabel = new Label(problem.message());
+				messageLabel.setTextFill(levelColor);
 				messageLabel.setMaxWidth(Integer.MAX_VALUE);
-				int line = problem.getLine();
+				int line = problem.line();
 				HBox problemBox;
 				if (line >= 0) {
 					Label lineLabel = new Label(String.valueOf(line), graphic);
-					lineLabel.setTextFill(Color.RED);
+					lineLabel.setTextFill(levelColor);
 					lineLabel.getStyleClass().add(Styles.TEXT_BOLD);
 					problemBox = new HBox(lineLabel, messageLabel);
 				} else {
@@ -157,13 +164,20 @@ public class ProblemOverlay extends Group implements EditorComponent, ProblemInv
 			// Show the count of each kind of problem
 			HBox wrapper = new HBox();
 			wrapper.setSpacing(5);
-			int info = tracking.getProblems(p -> p.getLevel().ordinal() <= ProblemLevel.INFO.ordinal()).size();
+			int info = tracking.getProblems(p -> p.level().ordinal() <= ProblemLevel.INFO.ordinal()).size();
 			int warn = tracking.getProblemsByLevel(ProblemLevel.WARN).size();
 			int error = tracking.getProblemsByLevel(ProblemLevel.ERROR).size();
 			if (info > 0) wrapper.getChildren().add(new Label(String.valueOf(info), iconInfo));
 			if (warn > 0) wrapper.getChildren().add(new Label(String.valueOf(warn), iconWarning));
 			if (error > 0) wrapper.getChildren().add(new Label(String.valueOf(error), iconError));
 			return wrapper;
+		}));
+		indicator.tooltipProperty().bind(problemCount.map(size -> {
+			if (size.intValue() == 0)
+				return new Tooltip(Lang.get("assembler.problem.0"));
+			else if (size.intValue() == 1)
+				return new Tooltip(Lang.get("assembler.problem.1"));
+			return new Tooltip(Lang.get("assembler.problem.N").replace("N", String.valueOf(size)));
 		}));
 
 		BooleanBinding hasProblems = problemCount.greaterThan(0);
@@ -244,7 +258,7 @@ public class ProblemOverlay extends Group implements EditorComponent, ProblemInv
 			tracking.addListener(this);
 
 			// Initial value set to trigger a UI refresh.
-			problemCount.set(tracking.getProblems().size());
+			problemCount.set(tracking.getAllProblems().size());
 
 			// Layout tweaks
 			StackPane.setAlignment(this, Pos.TOP_RIGHT);
@@ -273,6 +287,6 @@ public class ProblemOverlay extends Group implements EditorComponent, ProblemInv
 	public void onProblemInvalidation() {
 		ProblemTracking tracking = editor.getProblemTracking();
 		if (tracking != null)
-			FxThreadUtil.run(() -> problemCount.set(tracking.getProblems().size()));
+			FxThreadUtil.run(() -> problemCount.set(tracking.getAllProblems().size()));
 	}
 }

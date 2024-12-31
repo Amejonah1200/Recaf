@@ -17,21 +17,23 @@ import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import me.darknet.assembler.ast.ASTElement;
+import me.darknet.assembler.ast.primitive.ASTCode;
 import me.darknet.assembler.ast.primitive.ASTIdentifier;
 import me.darknet.assembler.ast.primitive.ASTInstruction;
 import me.darknet.assembler.ast.specific.ASTClass;
 import me.darknet.assembler.ast.specific.ASTMethod;
 import me.darknet.assembler.compile.analysis.AnalysisResults;
-import me.darknet.assembler.compile.analysis.Local;
 import me.darknet.assembler.compile.analysis.frame.Frame;
 import me.darknet.assembler.util.Location;
 import me.darknet.assembler.util.Range;
 import org.fxmisc.richtext.CodeArea;
 import org.reactfx.Change;
 import org.reactfx.EventStreams;
+import org.slf4j.Logger;
 import software.coley.collections.Lists;
+import software.coley.recaf.analytics.logging.Logging;
 import software.coley.recaf.services.cell.CellConfigurationService;
-import software.coley.recaf.ui.config.TextFormatConfig;
+import software.coley.recaf.services.text.TextFormatConfig;
 import software.coley.recaf.ui.control.richtext.Editor;
 import software.coley.recaf.ui.control.richtext.linegraphics.AbstractLineGraphicFactory;
 import software.coley.recaf.ui.control.richtext.linegraphics.LineContainer;
@@ -40,13 +42,11 @@ import software.coley.recaf.util.Lang;
 import software.coley.recaf.util.SVG;
 import software.coley.recaf.workspace.model.Workspace;
 
-import java.awt.*;
+import java.awt.RenderingHints;
 import java.time.Duration;
-import java.util.List;
 import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.stream.Stream;
 
 /**
  * Component panel for the assembler which shows the variables of the currently selected method.
@@ -55,6 +55,7 @@ import java.util.stream.Stream;
  */
 @Dependent
 public class JvmVariablesPane extends AstBuildConsumerComponent {
+	private static final Logger logger = Logging.get(JvmVariablesPane.class);
 	private final SimpleObjectProperty<Object> notifyQueue = new SimpleObjectProperty<>(new Object());
 	private final TableView<VariableData> table = new TableView<>();
 	private final Consumer<Change<Integer>> onCaretMove = this::onCaretMove;
@@ -67,21 +68,21 @@ public class JvmVariablesPane extends AstBuildConsumerComponent {
 	                        @Nonnull Workspace workspace) {
 		TableColumn<VariableData, String> columnName = new TableColumn<>(Lang.get("assembler.variables.name"));
 		TableColumn<VariableData, ClassType> columnType = new TableColumn<>(Lang.get("assembler.variables.type"));
-		TableColumn<VariableData, VariableUsages> columnUsage = new TableColumn<>(Lang.get("assembler.variables.usage"));
-		columnName.setCellValueFactory(param -> new SimpleStringProperty(param.getValue().name));
-		columnType.setCellValueFactory(param -> new SimpleObjectProperty<>(param.getValue().type));
-		columnUsage.setCellValueFactory(param -> new SimpleObjectProperty<>(param.getValue().usage));
+		TableColumn<VariableData, AstUsages> columnUsage = new TableColumn<>(Lang.get("assembler.variables.usage"));
+		columnName.setCellValueFactory(param -> new SimpleStringProperty(param.getValue().name()));
+		columnType.setCellValueFactory(param -> new SimpleObjectProperty<>(param.getValue().type()));
+		columnUsage.setCellValueFactory(param -> new SimpleObjectProperty<>(param.getValue().usage()));
 		columnType.setCellFactory(param -> new TypeTableCell<>(cellConfigurationService, formatConfig, workspace));
 		columnUsage.setCellFactory(param -> new TableCell<>() {
 			@Override
-			protected void updateItem(VariableUsages usages, boolean empty) {
+			protected void updateItem(AstUsages usages, boolean empty) {
 				super.updateItem(usages, empty);
 				if (empty || usages == null) {
 					setText(null);
 					setGraphic(null);
 					setOnMousePressed(null);
 				} else {
-					String usageFmt = "%d reads, %d writes".formatted(usages.readers.size(), usages.writers.size());
+					String usageFmt = "%d reads, %d writes".formatted(usages.readers().size(), usages.writers().size());
 					setText(usageFmt);
 				}
 			}
@@ -118,7 +119,13 @@ public class JvmVariablesPane extends AstBuildConsumerComponent {
 
 		EventStreams.changesOf(notifyQueue)
 				.reduceSuccessions(Collections::singletonList, Lists::add, Duration.ofMillis(Editor.SHORT_DELAY_MS))
-				.addObserver(unused -> updateTable());
+				.addObserver(unused -> {
+					try {
+						updateTable();
+					} catch (Throwable t) {
+						logger.error("Error updating variables table", t);
+					}
+				});
 	}
 
 	@Override
@@ -172,7 +179,7 @@ public class JvmVariablesPane extends AstBuildConsumerComponent {
 		// Determine which variable is at the caret position
 		VariableData currentVarSelection = null;
 		for (VariableData item : table.getItems()) {
-			VariableUsages usage = item.usage();
+			AstUsages usage = item.usage();
 			ASTElement matchedAst = usage.readersAndWriters()
 					.filter(e -> e.range().within(pos))
 					.findFirst().orElse(null);
@@ -196,14 +203,14 @@ public class JvmVariablesPane extends AstBuildConsumerComponent {
 		items.clear();
 
 		// Collect all variable usage information from the AST.
-		VariableUsages emptyUsage = VariableUsages.EMPTY_USAGE;
-		Map<String, VariableUsages> variableUsages = new HashMap<>();
+		AstUsages emptyUsage = AstUsages.EMPTY_USAGE;
+		Map<String, AstUsages> variableUsages = new HashMap<>();
 		BiConsumer<String, ASTElement> readUpdater = (name, element) -> {
-			VariableUsages existing = variableUsages.getOrDefault(name, emptyUsage);
+			AstUsages existing = variableUsages.getOrDefault(name, emptyUsage);
 			variableUsages.put(name, existing.withNewRead(element));
 		};
 		BiConsumer<String, ASTElement> writeUpdater = (name, element) -> {
-			VariableUsages existing = variableUsages.getOrDefault(name, emptyUsage);
+			AstUsages existing = variableUsages.getOrDefault(name, emptyUsage);
 			variableUsages.put(name, existing.withNewWrite(element));
 		};
 		if (astElements != null) {
@@ -214,7 +221,10 @@ public class JvmVariablesPane extends AstBuildConsumerComponent {
 					String literalName = parameter.literal();
 					variableUsages.putIfAbsent(literalName, emptyUsage);
 				}
-				for (ASTInstruction instruction : astMethod.code().instructions()) {
+				ASTCode code = astMethod.code();
+				if (code == null)
+					return;
+				for (ASTInstruction instruction : code.instructions()) {
 					String insnName = instruction.identifier().content();
 					boolean isLoad = insnName.endsWith("load");
 					if (((isLoad || insnName.endsWith("store")) && insnName.charAt(1) != 'a') || insnName.equals("iinc")) {
@@ -267,7 +277,7 @@ public class JvmVariablesPane extends AstBuildConsumerComponent {
 	}
 
 	private void clearData() {
-		table.getItems().clear();
+		FxThreadUtil.run(() -> table.getItems().clear());
 		currentMethod = null;
 	}
 
@@ -340,91 +350,6 @@ public class JvmVariablesPane extends AstBuildConsumerComponent {
 			}
 			graphic.setCursor(Cursor.HAND);
 			container.addHorizontal(graphic);
-		}
-	}
-
-	/**
-	 * Models a variable.
-	 *
-	 * @param name
-	 * 		Name of variable.
-	 * @param type
-	 * 		Type of variable.
-	 * @param usage
-	 * 		Usages of the variable in the AST.
-	 */
-	public record VariableData(@Nonnull String name, @Nonnull ClassType type, @Nonnull VariableUsages usage) {
-		/**
-		 * @param local
-		 * 		blw variable declaration.
-		 * @param usage
-		 * 		AST usage.
-		 *
-		 * @return Data from a blw variable, plus AST usage.
-		 */
-		@Nonnull
-		public static VariableData adaptFrom(@Nonnull Local local, @Nonnull VariableUsages usage) {
-			return new VariableData(local.name(), local.type(), usage);
-		}
-
-		/**
-		 * @param other
-		 * 		Other variable data to check against.
-		 *
-		 * @return {@code true} if the variable held by this data is the same as the other.
-		 */
-		public boolean matchesNameType(@Nullable VariableData other) {
-			if (other == null) return false;
-			return name.equals(other.name) && type.equals(other.type);
-		}
-	}
-
-	/**
-	 * Models variable usage.
-	 *
-	 * @param readers
-	 * 		Elements that read from the variable.
-	 * @param writers
-	 * 		Elements that write to the variable.
-	 */
-	public record VariableUsages(@Nonnull List<ASTElement> readers, @Nonnull List<ASTElement> writers) {
-		/**
-		 * Empty variable usage.
-		 */
-		private static final VariableUsages EMPTY_USAGE = new VariableUsages(Collections.emptyList(), Collections.emptyList());
-
-		/**
-		 * @return Stream of both readers and writers.
-		 */
-		@Nonnull
-		public Stream<ASTElement> readersAndWriters() {
-			return Stream.concat(readers.stream(), writers.stream());
-		}
-
-		/**
-		 * @param element
-		 * 		Element to add as a reader.
-		 *
-		 * @return Copy with added element.
-		 */
-		@Nonnull
-		public VariableUsages withNewRead(@Nonnull ASTElement element) {
-			List<ASTElement> newReaders = new ArrayList<>(readers);
-			newReaders.add(element);
-			return new VariableUsages(newReaders, writers);
-		}
-
-		/**
-		 * @param element
-		 * 		Element to add as a writer.
-		 *
-		 * @return Copy with added element.
-		 */
-		@Nonnull
-		public VariableUsages withNewWrite(@Nonnull ASTElement element) {
-			List<ASTElement> newWriters = new ArrayList<>(writers);
-			newWriters.add(element);
-			return new VariableUsages(readers, newWriters);
 		}
 	}
 }

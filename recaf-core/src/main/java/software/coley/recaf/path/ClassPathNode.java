@@ -2,10 +2,14 @@ package software.coley.recaf.path;
 
 import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
+import net.greypanther.natsort.CaseInsensitiveSimpleNaturalComparator;
 import software.coley.recaf.info.ClassInfo;
+import software.coley.recaf.info.FileInfo;
 import software.coley.recaf.info.InnerClassInfo;
 import software.coley.recaf.info.annotation.AnnotationInfo;
 import software.coley.recaf.info.member.ClassMember;
+import software.coley.recaf.workspace.model.bundle.ClassBundle;
+import software.coley.recaf.workspace.model.bundle.FileBundle;
 
 import java.util.Set;
 
@@ -100,6 +104,18 @@ public class ClassPathNode extends AbstractPathNode<String, ClassInfo> {
 		return new AnnotationPathNode(this, annotation);
 	}
 
+	@Nonnull
+	@Override
+	public ClassPathNode withCurrentWorkspaceContent() {
+		DirectoryPathNode parent = getParent();
+		if (parent == null) return this;
+		ClassBundle<?> bundle = getValueOfType(ClassBundle.class);
+		if (bundle == null) return this;
+		ClassInfo classInfo = bundle.get(getValue().getName());
+		if (classInfo == null || classInfo == getValue()) return this;
+		return parent.child(classInfo);
+	}
+
 	@Override
 	public boolean hasEqualOrChildValue(@Nonnull PathNode<?> other) {
 		if (other instanceof ClassPathNode otherClassPath) {
@@ -134,7 +150,7 @@ public class ClassPathNode extends AbstractPathNode<String, ClassInfo> {
 		if (o instanceof ClassPathNode classPathNode) {
 			String name = getValue().getName();
 			String otherName = classPathNode.getValue().getName();
-			return String.CASE_INSENSITIVE_ORDER.compare(name, otherName);
+			return CaseInsensitiveSimpleNaturalComparator.getInstance().compare(name, otherName);
 		}
 		return 0;
 	}
